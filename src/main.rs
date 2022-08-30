@@ -1,9 +1,7 @@
-//! # Pico Blinky Example
+//! # Laminator Controller
 //!
-//! Blinks the LED on a Pico board.
+//! Runs the custom laminator controller powered by the Pico W
 //!
-//! This will blink an LED attached to GP25, which is the pin the Pico uses for
-//! the on-board LED.
 //!
 //! See the `Cargo.toml` file for Copyright and license details.
 
@@ -31,13 +29,7 @@ use rp_pico::hal::pac;
 // higher-level drivers.
 use rp_pico::hal;
 
-/// Entry point to our bare-metal application.
-///
-/// The `#[entry]` macro ensures the Cortex-M start-up code calls this function
-/// as soon as all global variables are initialised.
-///
-/// The function configures the RP2040 peripherals, then blinks the LED in an
-/// infinite loop.
+/// Entry point
 #[entry]
 fn main() -> ! {
     // Grab our singleton objects
@@ -77,14 +69,31 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    // Set the LED to be an output
+    // Set the pin to be an output
     let mut test_pin = pins.gpio0.into_push_pull_output();
+    let mut pump_main = pins.gpio12.into_push_pull_output();
+    let mut pump_bladder = pins.gpio11.into_push_pull_output();
+    let mut htr_center = pins.gpio15.into_push_pull_output();
+    let mut htr_fb = pins.gpio14.into_push_pull_output();
+    let mut htr_lr = pins.gpio13.into_push_pull_output();
+
 
     // Blink the LED at 1 Hz
     loop {
         test_pin.set_high().unwrap();
+        pump_main.set_high().unwrap();
+        pump_bladder.set_high().unwrap();
+        htr_center.set_high().unwrap();
+        htr_fb.set_high().unwrap();
+        htr_lr.set_high().unwrap();
         delay.delay_ms(50);
+
         test_pin.set_low().unwrap();
+        pump_main.set_low().unwrap();
+        pump_bladder.set_low().unwrap();
+        htr_center.set_low().unwrap();
+        htr_fb.set_low().unwrap();
+        htr_lr.set_low().unwrap();
         delay.delay_ms(50);
     }
 }
