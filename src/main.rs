@@ -12,7 +12,6 @@
 use rp_pico::entry;
 
 // GPIO traits
-use embedded_hal::digital::v2::OutputPin;
 
 // Ensure we halt the program on panic (if we don't mention this crate it won't
 // be linked)
@@ -29,7 +28,7 @@ use rp_pico::hal::pac;
 // higher-level drivers.
 use rp_pico::hal;
 
-//use embedded_hal::PwmPin;
+use embedded_hal::PwmPin;
 
 /// Entry point
 #[entry]
@@ -71,37 +70,36 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
+    // The minimum and max PWM values
+    const LOW: u16 = 0;
+    const HIGH: u16 = 65535;
 
-    // // Init PWMs
-    // let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+    // Init PWMs
+    let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
-    // // Configure PWM7
-    // let pwm = &mut pwm_slices.pwm7;
-    // pwm.set_ph_correct();
-    // pwm.set_div_int(255u8); // To set integer part of clock divider
-    // pwm.enable();
+    // Configure PWM7
+    let pwm = &mut pwm_slices.pwm7;
+    pwm.set_ph_correct();
+    pwm.set_div_int(255u8); // To set integer part of clock divider
+    pwm.enable();
 
-    // // Output channel B on PWM7 to pin
-    // let channel = &mut pwm.channel_b;
-    // channel.output_to(pins.gpio15);
-    // channel.set_duty(0x8000);
-
-    // Set the pin to be an output
-    let mut test_pin = pins.gpio0.into_push_pull_output();
-    let mut pump_main = pins.gpio12.into_push_pull_output();
-    let mut pump_bladder = pins.gpio11.into_push_pull_output();
+    // Output channel B on PWM7 to pin GPIO15
+    let channel = &mut pwm.channel_b;
+    channel.output_to(pins.gpio15);
 
     // Main loop forever
     loop {
-        test_pin.set_high().unwrap();
-        pump_main.set_high().unwrap();
-        pump_bladder.set_high().unwrap();
-        delay.delay_ms(50);
+        // Ramp duty factor up
+        for i in LOW..=HIGH {
+            delay.delay_us(100);
+            channel.set_duty(i);
+        }
 
-        test_pin.set_low().unwrap();
-        pump_main.set_low().unwrap();
-        pump_bladder.set_low().unwrap();
-        delay.delay_ms(50);
+        // Ramp duty factor down
+        for i in LOW..=HIGH {
+            delay.delay_us(100);
+            channel.set_duty(i);
+        }
     }
 }
 
