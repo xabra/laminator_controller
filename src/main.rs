@@ -11,6 +11,10 @@
 // The macro for our start-up function
 use rp_pico::entry;
 
+// Logging stuff..
+use defmt::*;
+use defmt_rtt as _;
+
 // GPIO traits
 
 // Ensure we halt the program on panic (if we don't mention this crate it won't
@@ -89,17 +93,19 @@ fn main() -> ! {
 
     // Main loop forever
     loop {
+        info!("Ramp up !");
         // Ramp duty factor up
         for i in LOW..=HIGH {
             delay.delay_us(100);
             channel.set_duty(i);
         }
-
+        info!("Ramp down");
         // Ramp duty factor down
-        for i in LOW..=HIGH {
+        for i in (LOW..=HIGH).rev() {
             delay.delay_us(100);
             channel.set_duty(i);
         }
+
     }
 }
 
