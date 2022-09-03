@@ -6,7 +6,7 @@
       "preLaunchTask": "rust: cargo build",
       "type": "probe-rs-debug",
       "request": "launch",
-      "name": "rp2040-project",
+      "name": "laminator_controller",
       "cwd": "${workspaceFolder}",
       "chip": "rp2040",
       // RP2040 doesn't support connectUnderReset
