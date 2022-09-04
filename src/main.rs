@@ -34,6 +34,10 @@ use rp_pico::hal;
 
 use embedded_hal::PwmPin;
 
+use embedded_hal::spi::MODE_0;
+use fugit::RateExtU32;
+use rp2040_hal::{spi::Spi, gpio::{Pins, FunctionSpi}, pac, Sio};
+
 /// Entry point
 #[entry]
 fn main() -> ! {
@@ -91,6 +95,9 @@ fn main() -> ! {
     let channel = &mut pwm.channel_b;
     channel.output_to(pins.gpio15);
 
+    // Init T/C Chip select GPIOs
+    let mut tc_ctr_select_n = pins.gpio17.into_push_pull_output();
+
     // Main loop forever
     loop {
         info!("Ramp up !");
@@ -108,5 +115,7 @@ fn main() -> ! {
 
     }
 }
+
+
 
 // End of file
