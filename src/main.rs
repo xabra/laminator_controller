@@ -154,11 +154,27 @@ fn thermocouple_fault_type(low_word: u16) -> TempSensorFaultType {
 }
 
 fn temperature_degc(high_word: u16) -> f32 { 
-    let mask:u16 = 0b0000_0000_0000_0011;
+    const MASK:u16 = 0b0000_0000_0000_0011;
 
-    // Zero out the lowest two bits (reserved and fault bit)
-    let masked:i16 = (high_word & !mask) as i16;
+    // Clear the lowest two bits (reserved and fault bit)
+    // and convert to signed int using the same length word
+    let masked:i16 = (high_word & !MASK) as i16;
+
+    // Divide by 16.0 to scale the raw value to a temperature in deg C
     let temp = float_funcs::fdiv(float_funcs::int_to_float(masked as i32), 16.0);
+    
+    return temp;
+}
+
+fn reference_junction_temperature_degc(low_word: u16) -> f32 { 
+    const MASK:u16 = 0b0000_0000_0000_0111;
+
+    // Clear the lowest three bits (fault code bits)
+    // and convert to signed int using the same length word
+    let masked:i16 = (low_word & !MASK) as i16;
+
+    // Divide by 256.0 to scale the raw value to a temperature in deg C
+    let temp = float_funcs::fdiv(float_funcs::int_to_float(masked as i32), 256.0);
     
     return temp;
 }
