@@ -8,6 +8,7 @@
 #![no_std]
 #![no_main]
 
+use cortex_m::prelude::_embedded_hal_blocking_spi_Transfer;
 // The macro for our start-up function
 use rp_pico::entry;
 
@@ -16,6 +17,8 @@ use defmt::*;
 use defmt_rtt as _;
 
 // GPIO traits
+use embedded_hal::digital::v2::{InputPin, OutputPin};
+use rp2040_hal::rom_data::float_funcs;
 
 // Ensure we halt the program on panic (if we don't mention this crate it won't
 // be linked)
@@ -28,15 +31,14 @@ use rp_pico::hal::prelude::*;
 // register access
 use rp_pico::hal::pac;
 
+use rp_pico::hal::gpio;
+
 // A shorter alias for the Hardware Abstraction Layer, which provides
 // higher-level drivers.
 use rp_pico::hal;
 
-use embedded_hal::PwmPin;
-
-use embedded_hal::spi::MODE_0;
+use rp_pico::hal::spi;
 use fugit::RateExtU32;
-use rp2040_hal::{spi::Spi, gpio::{Pins, FunctionSpi}, pac, Sio};
 
 /// Entry point
 #[entry]
@@ -78,44 +80,107 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    // The minimum and max PWM values
-    const LOW: u16 = 0;
-    const HIGH: u16 = 65535;
-
-    // Init PWMs
-    let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
-
-    // Configure PWM7
-    let pwm = &mut pwm_slices.pwm7;
-    pwm.set_ph_correct();
-    pwm.set_div_int(255u8); // To set integer part of clock divider
-    pwm.enable();
-
-    // Output channel B on PWM7 to pin GPIO15
-    let channel = &mut pwm.channel_b;
-    channel.output_to(pins.gpio15);
-
+    // =============  SPECIFIC FUNCTIONS UNDER TEST ===========================
     // Init T/C Chip select GPIOs
     let mut tc_ctr_select_n = pins.gpio17.into_push_pull_output();
+    let mut tc_lr_select_n = pins.gpio19.into_push_pull_output();
+    let mut tc_fb_select_n = pins.gpio20.into_push_pull_output();
+    // Initial TC chip select settings --> high
+    tc_ctr_select_n.set_high().unwrap();
+    tc_fb_select_n.set_high().unwrap();
+    tc_lr_select_n.set_high().unwrap();
 
+    // Set up SPI CLK and DataIn Lines.  These are implicitly used by the spi driver if they are in the correct mode
+    let _spi_sclk = pins.gpio18.into_mode::<gpio::FunctionSpi>();
+    let _spi_mosi = pins.gpio3.into_mode::<gpio::FunctionSpi>();
+    let _spi_miso = pins.gpio16.into_mode::<gpio::FunctionSpi>();
+
+    let mut spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
+
+    let dummy_data = &mut [0x88FFu16, 0x88FFu16];
     // Main loop forever
     loop {
-        info!("Ramp up !");
-        // Ramp duty factor up
-        for i in LOW..=HIGH {
-            delay.delay_us(100);
-            channel.set_duty(i);
-        }
-        info!("Ramp down");
-        // Ramp duty factor down
-        for i in (LOW..=HIGH).rev() {
-            delay.delay_us(100);
-            channel.set_duty(i);
+        
+        // Set chip select low (active)
+        tc_fb_select_n.set_low().unwrap();
+
+        // transfer 16 bits out and in.
+        let res = spi.transfer( dummy_data).unwrap();
+        let high_word = res[0];
+        let low_word = res[1];
+        let temp = temperature_degc(high_word);
+        info!("High Word: {=u16}, As signed int: {=f32}", high_word, temp);
+        info!("Low Word: {=u16}", low_word);
+        if is_thermocouple_fault(high_word){
+            info!("-----------TC Fault !")
         }
 
+
+        delay.delay_ms(1);
+
+        // Set chip select high (inactive)
+        tc_fb_select_n.set_high().unwrap();
+        delay.delay_ms(500);
     }
 }
 
 
+// ------- STRUCTS & FUNCTIONS ----------------
+enum TempSensorFaultType {
+    TempSensorShortToVCC,
+    TempSensorShortToGND,
+    TempSensorOpenCircuit,
+    NoFault,
+}
+fn is_thermocouple_fault(high_word: u16) -> bool { 
+    let bit0_mask = 0x0001_u16;
+    return high_word & bit0_mask == 1;
+}
 
+fn thermocouple_fault_type(low_word: u16) -> TempSensorFaultType { 
+    const OC_MASK:u16 = 0x0001_u16;
+    const SCG_MASK:u16 = 0x0002_u16;
+    const SCV_MASK:u16 = 0x0004_u16;
+
+    if OC_MASK & low_word != 0 {
+        return TempSensorFaultType::TempSensorOpenCircuit;
+    }else if SCG_MASK & low_word != 0 {
+        return TempSensorFaultType::TempSensorShortToGND;
+    } else if SCV_MASK & low_word != 0 {
+        return TempSensorFaultType::TempSensorShortToVCC
+    } else {
+        return TempSensorFaultType::NoFault;
+    }
+}
+
+fn temperature_degc(high_word: u16) -> f32 { 
+    let mask:u16 = 0b0000_0000_0000_0011;
+
+    // Zero out the lowest two bits (reserved and fault bit)
+    let masked:i16 = (high_word & !mask) as i16;
+    let temp = float_funcs::fdiv(float_funcs::int_to_float(masked as i32), 16.0);
+    
+    return temp;
+}
+
+enum TempSensor {
+    TempSensorCenter,
+    TempSensorLeftRight,
+    TempSensorFrontBack,
+}
+
+struct TempSensorController {
+    
+}
+
+impl TempSensorController {
+    // Associated function
+    fn new() -> TempSensorController {
+        TempSensorController {  }
+    }
+
+    fn disable_all(&self) { 
+        
+    }
+    }
 // End of file
