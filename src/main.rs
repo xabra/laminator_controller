@@ -42,7 +42,7 @@ use fugit::RateExtU32;
 
 /// Entry point
 #[entry]
-fn main() -> ! {
+fn main() -> ! {        // '!' means never returns
     // Grab our singleton objects
     let mut pac = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
@@ -80,12 +80,13 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    // =============  SPECIFIC FUNCTIONS UNDER TEST ===========================
-    // Init T/C Chip select GPIOs
+    // =============  SPI T/C Control ===========================
+
+    // Init the T/C Chip select GPIOs
     let mut tc_ctr_select_n = pins.gpio17.into_push_pull_output();
     let mut tc_lr_select_n = pins.gpio19.into_push_pull_output();
     let mut tc_fb_select_n = pins.gpio20.into_push_pull_output();
-    // Initial TC chip select settings --> high
+    // Initially set TC chip select settings --> high
     tc_ctr_select_n.set_high().unwrap();
     tc_fb_select_n.set_high().unwrap();
     tc_lr_select_n.set_high().unwrap();
@@ -97,10 +98,13 @@ fn main() -> ! {
 
     let mut spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
 
-    let dummy_data = &mut [0x88FFu16, 0x88FFu16];
+    let dummy_data = &mut [0x88FFu16, 0x88FFu16];   // Must write any data to chip to read data.
+    
+    
     // Main loop forever
     loop {
         
+        // Read all three T/C s raw data
         // Set chip select low (active)
         tc_fb_select_n.set_low().unwrap();
 
@@ -108,19 +112,31 @@ fn main() -> ! {
         let res = spi.transfer( dummy_data).unwrap();
         let high_word = res[0];
         let low_word = res[1];
-        let temp = temperature_degc(high_word);
-        info!("High Word: {=u16}, As signed int: {=f32}", high_word, temp);
-        info!("Low Word: {=u16}", low_word);
-        if is_thermocouple_fault(high_word){
-            info!("-----------TC Fault !")
-        }
-
-
-        delay.delay_ms(1);
 
         // Set chip select high (inactive)
         tc_fb_select_n.set_high().unwrap();
+
+
         delay.delay_ms(500);
+
+        // Process and log data
+
+        if is_thermocouple_fault(high_word) {
+            let ft = thermocouple_fault_type(low_word);
+            match ft {
+                TempSensorFaultType::TempSensorShortToVCC => {info!("TC Fault: Shorted to VCC");}
+                TempSensorFaultType::TempSensorShortToGND => {info!("TC Fault: Shorted to GND");}
+                TempSensorFaultType::TempSensorOpenCircuit => {info!("TC Fault: Open Circuit");}
+                TempSensorFaultType::NoFault => {info!("TC Fault: Open Circuit");}
+            }
+            
+        } else {        // No fault, get temps.
+            let temp = temperature_degc(high_word);
+            let ref_temp = reference_junction_temperature_degc(low_word);
+            info!("Temp: {=f32}, Ref Temp: {=f32}", temp, ref_temp);
+        }
+
+
     }
 }
 
@@ -179,6 +195,7 @@ fn reference_junction_temperature_degc(low_word: u16) -> f32 {
     return temp;
 }
 
+// ------------ Temp Controller ----------------
 enum TempSensor {
     TempSensorCenter,
     TempSensorLeftRight,
@@ -186,17 +203,20 @@ enum TempSensor {
 }
 
 struct TempSensorController {
-    
+    // Chip select gpio pins
+    //tc_ctr_select_n<rp_pico::Pins>
+   // tc_lr_select_n:rp_pico::Pins::Pin<rp2040_hal::Gpio19,Output<PushPull>>,
+    //c_fb_select_n:rp_pico::Pins::Pin<rp2040_hal::Gpio20,Output<PushPull>>,
 }
 
 impl TempSensorController {
     // Associated function
-    fn new() -> TempSensorController {
-        TempSensorController {  }
-    }
-
-    fn disable_all(&self) { 
-        
-    }
-    }
+    // fn new(pins:rp_pico::Pins) -> TempSensorController {
+    //     TempSensorController { 
+    //         tc_ctr_select_n: pins.gpio17.into_push_pull_output(),
+    //         tc_lr_select_n: pins.gpio19.into_push_pull_output(),
+    //         tc_fb_select_n: pins.gpio20.into_push_pull_output(),   
+    //     }
+    // }
+}
 // End of file
