@@ -98,45 +98,40 @@ fn main() -> ! {        // '!' means never returns
 
     let mut spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
 
-    let dummy_data = &mut [0x88FFu16, 0x88FFu16];   // Must write any data to chip to read data.
-    
+    let fb_dummy = &mut [0x88FFu16, 0x88FFu16];   // Must write any data to chip to read data.
+    let lr_dummy = &mut [0x88FFu16, 0x88FFu16];   // Must write any data to chip to read data.
+    let ctr_dummy = &mut [0x88FFu16, 0x88FFu16];   // Must write any data to chip to read data.
     
     // Main loop forever
     loop {
         
         // Read all three T/C s raw data
-        // Set chip select low (active)
-        tc_fb_select_n.set_low().unwrap();
 
-        // transfer 16 bits out and in.
-        let res = spi.transfer( dummy_data).unwrap();
-        let high_word = res[0];
-        let low_word = res[1];
+        // Read FB T/C
+        tc_fb_select_n.set_low().unwrap(); // Set chip select low (active)
+        let tc_fb_raw = spi.transfer( fb_dummy).unwrap(); // transfer 2 16 bit words out/in.
+        tc_fb_select_n.set_high().unwrap(); // Set chip select high (inactive)
 
-        // Set chip select high (inactive)
-        tc_fb_select_n.set_high().unwrap();
+        // Read LR T/C
+        tc_lr_select_n.set_low().unwrap(); // Set chip select low (active)
+        let tc_lr_raw = spi.transfer( lr_dummy).unwrap(); // transfer 2 16 bit words out/in.
+        tc_lr_select_n.set_high().unwrap(); // Set chip select high (inactive)
 
+        // Read CTR T/C
+        tc_ctr_select_n.set_low().unwrap(); // Set chip select low (active)
+        let tc_ctr_raw = spi.transfer( ctr_dummy).unwrap(); // transfer 2 16 bit words out/in.
+        tc_ctr_select_n.set_high().unwrap(); // Set chip select high (inactive)
 
-        delay.delay_ms(500);
-
+        
         // Process and log data
+        //info!("FB TC:");
+        debug_print_tc (tc_fb_raw, "FB");
+       // info!("LR TC:");
+        debug_print_tc (tc_lr_raw, "LR");
+        //info!("CTR TC:");
+        debug_print_tc (tc_ctr_raw, "CTR");
 
-        if is_thermocouple_fault(high_word) {
-            let ft = thermocouple_fault_type(low_word);
-            match ft {
-                TempSensorFaultType::TempSensorShortToVCC => {info!("TC Fault: Shorted to VCC");}
-                TempSensorFaultType::TempSensorShortToGND => {info!("TC Fault: Shorted to GND");}
-                TempSensorFaultType::TempSensorOpenCircuit => {info!("TC Fault: Open Circuit");}
-                TempSensorFaultType::NoFault => {info!("TC Fault: Open Circuit");}
-            }
-            
-        } else {        // No fault, get temps.
-            let temp = temperature_degc(high_word);
-            let ref_temp = reference_junction_temperature_degc(low_word);
-            info!("Temp: {=f32}, Ref Temp: {=f32}", temp, ref_temp);
-        }
-
-
+        delay.delay_ms(2000);    // Delay to set overally loop rate
     }
 }
 
@@ -166,6 +161,27 @@ fn thermocouple_fault_type(low_word: u16) -> TempSensorFaultType {
         return TempSensorFaultType::TempSensorShortToVCC
     } else {
         return TempSensorFaultType::NoFault;
+    }
+}
+
+fn debug_print_tc_fault_type (low_word: u16, name: &str){
+    let ft = thermocouple_fault_type(low_word);
+    match ft {
+        TempSensorFaultType::TempSensorShortToVCC => {info!("{=str} Shorted to VCC", name);}
+        TempSensorFaultType::TempSensorShortToGND => {info!("{=str} Shorted to GND", name);}
+        TempSensorFaultType::TempSensorOpenCircuit => {info!("{=str} Open Circuit", name);}
+        TempSensorFaultType::NoFault => {info!("{=str} No fault", name);}
+    }
+}
+
+fn debug_print_tc (tc_raw: &[u16], name: &str) {
+    if  is_thermocouple_fault(tc_raw[0]) {
+        //info!("TC Fault:");
+        debug_print_tc_fault_type(tc_raw[1], name);
+    } else {
+        let temp = temperature_degc(tc_raw[0]);
+        let ref_temp = reference_junction_temperature_degc(tc_raw[1]);
+        info!("{=str} Temp: {=f32}   Ref Temp:{=f32}", name, temp, ref_temp);
     }
 }
 
