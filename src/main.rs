@@ -9,6 +9,9 @@
 #![no_main]
 
 use cortex_m::prelude::_embedded_hal_blocking_spi_Transfer;
+// I2C HAL traits & Types.
+use embedded_hal::blocking::i2c::{Operation, Read, Transactional, Write};
+//use embedded_hal::blocking::i2c::SevenBitAddress;
 // The macro for our start-up function
 use rp_pico::entry;
 
@@ -31,13 +34,12 @@ use rp_pico::hal::prelude::*;
 // register access
 use rp_pico::hal::pac;
 
-use rp_pico::hal::gpio;
 
 // A shorter alias for the Hardware Abstraction Layer, which provides
 // higher-level drivers.
 use rp_pico::hal;
 
-use rp_pico::hal::spi;
+//use rp_pico::hal::spi;
 use fugit::RateExtU32;
 
 /// Entry point
@@ -80,58 +82,40 @@ fn main() -> ! {        // '!' means never returns
         &mut pac.RESETS,
     );
 
-    // =============  SPI T/C Control ===========================
+    // =============  I2C Control ===========================
 
-    // Init the T/C Chip select GPIOs
-    let mut tc_ctr_select_n = pins.gpio17.into_push_pull_output();
-    let mut tc_lr_select_n = pins.gpio19.into_push_pull_output();
-    let mut tc_fb_select_n = pins.gpio20.into_push_pull_output();
+    // Init the AD converter auxiliary GPIO pins
+    let mut ad_convert_start = pins.gpio6.into_push_pull_output();      // Active low??
+    let mut ad_alert = pins.gpio7.into_floating_input();        // AD Alert/Busy pin
     // Initially set TC chip select settings --> high
-    tc_ctr_select_n.set_high().unwrap();
-    tc_fb_select_n.set_high().unwrap();
-    tc_lr_select_n.set_high().unwrap();
+    ad_convert_start.set_low().unwrap();
 
-    // Set up SPI CLK and DataIn Lines.  These are implicitly used by the spi driver if they are in the correct mode
-    let _spi_sclk = pins.gpio18.into_mode::<gpio::FunctionSpi>();
-    let _spi_mosi = pins.gpio3.into_mode::<gpio::FunctionSpi>();
-    let _spi_miso = pins.gpio16.into_mode::<gpio::FunctionSpi>();
+    // Configure two pins as being I²C, not GPIO
+    let sda_pin = pins.gpio4.into_mode::<hal::gpio::FunctionI2C>();
+    let scl_pin = pins.gpio5.into_mode::<hal::gpio::FunctionI2C>();
 
-    let mut spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
+    let mut i2c = rp2040_hal::I2C::i2c0(
+        pac.I2C0,
+        sda_pin,
+        scl_pin,
+        400.kHz(),
+        &mut pac.RESETS,
+        &clocks.peripheral_clock,
+    );
 
-    let fb_dummy = &mut [0x88FFu16, 0x88FFu16];   // Must write any data to chip to read data.
-    let lr_dummy = &mut [0x88FFu16, 0x88FFu16];   // Must write any data to chip to read data.
-    let ctr_dummy = &mut [0x88FFu16, 0x88FFu16];   // Must write any data to chip to read data.
-    
+
+    let mut read_result = [0; 2];
     // Main loop forever
     loop {
-        
-        // Read all three T/C s raw data
+        // Generate conversion start pulse.
+        ad_convert_start.set_high().unwrap();
+        delay.delay_us(3);    // Delay for pulse width
+        ad_convert_start.set_low().unwrap();
 
-        // Read FB T/C
-        tc_fb_select_n.set_low().unwrap(); // Set chip select low (active)
-        let tc_fb_raw = spi.transfer( fb_dummy).unwrap(); // transfer 2 16 bit words out/in.
-        tc_fb_select_n.set_high().unwrap(); // Set chip select high (inactive)
+        //i2c.write(0b0010_0000, &[1]).unwrap();
+        i2c.read(0b0010_0000, &mut read_result).unwrap();
 
-        // Read LR T/C
-        tc_lr_select_n.set_low().unwrap(); // Set chip select low (active)
-        let tc_lr_raw = spi.transfer( lr_dummy).unwrap(); // transfer 2 16 bit words out/in.
-        tc_lr_select_n.set_high().unwrap(); // Set chip select high (inactive)
-
-        // Read CTR T/C
-        tc_ctr_select_n.set_low().unwrap(); // Set chip select low (active)
-        let tc_ctr_raw = spi.transfer( ctr_dummy).unwrap(); // transfer 2 16 bit words out/in.
-        tc_ctr_select_n.set_high().unwrap(); // Set chip select high (inactive)
-
-        
-        // Process and log data
-        //info!("FB TC:");
-        debug_print_tc (tc_fb_raw, "FB");
-       // info!("LR TC:");
-        debug_print_tc (tc_lr_raw, "LR");
-        //info!("CTR TC:");
-        debug_print_tc (tc_ctr_raw, "CTR");
-
-        delay.delay_ms(2000);    // Delay to set overally loop rate
+        delay.delay_ms(100);    // Delay to set overally loop rate
     }
 }
 
