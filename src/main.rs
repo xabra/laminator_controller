@@ -21,7 +21,7 @@ use defmt_rtt as _;
 
 // GPIO traits
 use embedded_hal::digital::v2::{InputPin, OutputPin};
-use rp2040_hal::rom_data::float_funcs;
+use rp2040_hal::rom_data::float_funcs::{fdiv, fmul, int_to_float};
 
 // Ensure we halt the program on panic (if we don't mention this crate it won't
 // be linked)
@@ -103,19 +103,43 @@ fn main() -> ! {        // '!' means never returns
         &clocks.peripheral_clock,
     );
 
+    const I2C_BUS_ADDRESS:u8 = 0b_0010_0000; // AD7994 i2c bus address
+    const I2C_CONFIG_REG_ADDRESS:u8 = 0b_0000_0010;  // Select the Config register for write
+    const I2C_CONFIG_REG_DATA:u8 = 0b_0101_1011; // Set config to convert channels 1 & 3 and filter on, busy output
+    const I2C_CONVERSION_RESULT_REG_ADDRESS:u8 = 0b_0000_0000;   //Select the conversion result register for subsequent reads.
+    const I2C_CONVERSION_RESULT_DATA_MASK:u16 = 0b_0000_1111_1111_1111; // Mask off the highest four bits
+    const I2C_CONVERSION_RESULT_CHANNEL_MASK:u8 = 0b_0000_0011; // Mask off 
+    const PRESSURE_SENSE_VREF:f32 = 5.0;
 
+    // Write to the AD7994 Configuration register
+    i2c.write(I2C_BUS_ADDRESS, &[I2C_CONFIG_REG_ADDRESS, I2C_CONFIG_REG_DATA]).unwrap();
+
+     // Write to the AD7994 address register for subsequent conversion result reads in the loop
+     i2c.write(I2C_BUS_ADDRESS, &[I2C_CONVERSION_RESULT_REG_ADDRESS]).unwrap();   
+    
     let mut read_result = [0; 2];
+    
     // Main loop forever
     loop {
         // Generate conversion start pulse.
-        ad_convert_start.set_high().unwrap();
-        delay.delay_us(3);    // Delay for pulse width
-        ad_convert_start.set_low().unwrap();
+        ad_convert_start.set_high().unwrap();   // Power up the converter
+        delay.delay_us(3);    // Remain high for minimum pulse width (~1us)
+        ad_convert_start.set_low().unwrap();    // Falling edge starts the conversion
+        delay.delay_us(3);    // Delay for conversion to finish before i2c reading (~2us)
 
-        //i2c.write(0b0010_0000, &[1]).unwrap();
-        i2c.read(0b0010_0000, &mut read_result).unwrap();
+        // Do i2c read from conversion
+        i2c.read(I2C_BUS_ADDRESS, &mut read_result).unwrap();
+        let value = (((read_result[0] as u16) << 8) | read_result[1] as u16) & I2C_CONVERSION_RESULT_DATA_MASK;
 
-        delay.delay_ms(100);    // Delay to set overally loop rate
+        // Scale the raw pressure signal
+        let pressure_volts = fmul(fdiv(int_to_float(value as i32), 4095.0), PRESSURE_SENSE_VREF);
+
+        // Get channel number (zero based, 0-3)
+        let channel = (read_result[0] >>4) & I2C_CONVERSION_RESULT_CHANNEL_MASK;
+
+        info!("Channel: {=u8},      Value:{=f32}", channel, pressure_volts);
+
+        delay.delay_ms(1000);    // Delay to set overall loop rate
     }
 }
 
@@ -177,7 +201,7 @@ fn temperature_degc(high_word: u16) -> f32 {
     let masked:i16 = (high_word & !MASK) as i16;
 
     // Divide by 16.0 to scale the raw value to a temperature in deg C
-    let temp = float_funcs::fdiv(float_funcs::int_to_float(masked as i32), 16.0);
+    let temp = fdiv(int_to_float(masked as i32), 16.0);
     
     return temp;
 }
@@ -190,7 +214,7 @@ fn reference_junction_temperature_degc(low_word: u16) -> f32 {
     let masked:i16 = (low_word & !MASK) as i16;
 
     // Divide by 256.0 to scale the raw value to a temperature in deg C
-    let temp = float_funcs::fdiv(float_funcs::int_to_float(masked as i32), 256.0);
+    let temp = fdiv(int_to_float(masked as i32), 256.0);
     
     return temp;
 }
