@@ -212,12 +212,6 @@ fn reference_junction_temperature_degc(low_word: u16) -> f32 {
 }
 
 // ------------ Temp Controller ----------------
-enum TempSensor {
-    TempSensorCenter,
-    TempSensorLeftRight,
-    TempSensorFrontBack,
-}
-
 struct TempSensorController {
     // Chip select gpio pins
     //tc_ctr_select_n<rp_pico::Pins>
@@ -234,5 +228,11 @@ impl TempSensorController {
     //         tc_fb_select_n: pins.gpio20.into_push_pull_output(),   
     //     }
     // }
+}
+
+enum TempSensor {
+    TempSensorCenter,
+    TempSensorLeftRight,
+    TempSensorFrontBack,
 }
 // End of file
