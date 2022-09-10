@@ -1,35 +1,26 @@
-//! # Laminator Controller
+//! # Controller
 //!
 //! Runs the custom laminator controller powered by the Pico W
 //!
-//!
-//! See the `Cargo.toml` file for Copyright and license details.
+
 
 #![no_std]
 #![no_main]
 
-// The macro for our start-up function
-use rp_pico::entry;
 
-// GPIO traits
+use rp_pico::entry;     // Entry point macro
+use panic_halt as _;    // panic fuctionality
+
 use embedded_hal::digital::v2::OutputPin;
-
-// Ensure we halt the program on panic (if we don't mention this crate it won't
-// be linked)
-use panic_halt as _;
-
-// Pull in any important traits
 use rp_pico::hal::prelude::*;
-
-// A shorter alias for the Peripheral Access Crate, which provides low-level
-// register access
 use rp_pico::hal::pac;
-
-// A shorter alias for the Hardware Abstraction Layer, which provides
-// higher-level drivers.
 use rp_pico::hal;
-
-//use embedded_hal::PwmPin;
+use rp_pico::hal::gpio;
+use rp_pico::hal::gpio::Output;
+use rp_pico::hal::gpio::PushPull;
+use rp_pico::hal::gpio::bank0::Gpio12;
+use rp_pico::hal::spi;
+use fugit::RateExtU32;
 
 /// Entry point
 #[entry]
@@ -41,9 +32,7 @@ fn main() -> ! {
     // Set up the watchdog driver - needed by the clock setup code
     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
 
-    // Configure the clocks
-    //
-    // The default is to generate a 125 MHz system clock
+    // Configure the clocks - default is 125 MHz system clock
     let clocks = hal::clocks::init_clocks_and_plls(
         rp_pico::XOSC_CRYSTAL_FREQ,
         pac.XOSC,
@@ -56,8 +45,7 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    // The delay object lets us wait for specified amounts of time (in
-    // milliseconds)
+    // Delay object
     let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
     // The single-cycle I/O block controls our GPIO pins
@@ -71,38 +59,41 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-
-    // // Init PWMs
-    // let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
-
-    // // Configure PWM7
-    // let pwm = &mut pwm_slices.pwm7;
-    // pwm.set_ph_correct();
-    // pwm.set_div_int(255u8); // To set integer part of clock divider
-    // pwm.enable();
-
-    // // Output channel B on PWM7 to pin
-    // let channel = &mut pwm.channel_b;
-    // channel.output_to(pins.gpio15);
-    // channel.set_duty(0x8000);
-
     // Set the pin to be an output
-    let mut test_pin = pins.gpio0.into_push_pull_output();
-    let mut pump_main = pins.gpio12.into_push_pull_output();
-    let mut pump_bladder = pins.gpio11.into_push_pull_output();
+    let chip_select = pins.gpio12.into_push_pull_output();
+    //let mut spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
+
+    let mut spi_ctrl = SpiController::new(chip_select);
 
     // Main loop forever
     loop {
-        test_pin.set_high().unwrap();
-        pump_main.set_high().unwrap();
-        pump_bladder.set_high().unwrap();
-        delay.delay_ms(50);
+        //chip_select.set_high().unwrap();
+        spi_ctrl.pin_high();
+        delay.delay_ms(2);
 
-        test_pin.set_low().unwrap();
-        pump_main.set_low().unwrap();
-        pump_bladder.set_low().unwrap();
-        delay.delay_ms(50);
+        //chip_select.set_low().unwrap();
+        spi_ctrl.pin_low();
+        delay.delay_ms(2);
     }
 }
 
-// End of file
+pub struct SpiController {
+    cs_pin: gpio::Pin<Gpio12, Output<PushPull>>, // What is the type?
+    //spi:  // What is the type?
+}
+
+impl SpiController {
+    fn new(cs:gpio::Pin<Gpio12, Output<PushPull>> ) -> SpiController {
+        SpiController{
+            cs_pin:cs
+        }
+    }
+    fn pin_high(&mut self){
+        self.cs_pin.set_high().unwrap();
+    }
+
+    fn pin_low(&mut self){
+        self.cs_pin.set_low().unwrap();
+    }
+}
+// // End of file
