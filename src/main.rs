@@ -62,7 +62,8 @@ fn main() -> ! {
     let pump_bladder_pin = pins.gpio11.into_push_pull_output();
 
     //Create the valve controller and initialize it.
-    let mut valve_controller = ValveController::new(pump_main_pin, pump_bladder_pin).init();
+    let mut valve_controller = ValveController::new(pump_main_pin, pump_bladder_pin);
+    valve_controller.init();
 
     //let mut spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
     //let mut spi_ctrl = ValveController::new(chip_select);
