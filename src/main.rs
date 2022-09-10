@@ -6,6 +6,8 @@
 #![no_std]
 #![no_main]
 
+pub mod valve_controller;
+
 use rp_pico::entry;     // Entry point macro
 use panic_halt as _;    // panic fuctionality
 
@@ -19,6 +21,9 @@ use rp_pico::hal::gpio::PushPull;
 use rp_pico::hal::gpio::bank0::{Gpio11,Gpio12};
 //use rp_pico::hal::spi;
 //use fugit::RateExtU32;
+use valve_controller::ValveState;
+use valve_controller::ValveController;
+
 
 /// Entry point
 #[entry]
@@ -73,52 +78,13 @@ fn main() -> ! {
     loop {
         valve_controller.set_main_valve(ValveState::Open);
         valve_controller.set_bladder_valve(ValveState::Closed);
-        delay.delay_ms(1);
+        delay.delay_ms(3);
 
         valve_controller.set_main_valve(ValveState::Closed);
         valve_controller.set_bladder_valve(ValveState::Open);
-        delay.delay_ms(1);
+        delay.delay_ms(10);
 
     }
 }
 
-pub struct ValveController {
-    pump_main_pin: gpio::Pin<Gpio12, Output<PushPull>>, 
-    pump_bladder_pin: gpio::Pin<Gpio11, Output<PushPull>>, 
-}
-enum ValveState {
-    Open,
-    Closed,
-}
-impl ValveController {
-    fn new(
-        pump_main_pin:gpio::Pin<Gpio12, Output<PushPull>>, 
-        pump_bladder_pin: gpio::Pin<Gpio11, Output<PushPull>>
-    ) -> ValveController {
-        ValveController{
-            pump_main_pin:pump_main_pin,
-            pump_bladder_pin:pump_bladder_pin
-        }
-    }
-    fn init(&mut self) {
-        self.set_main_valve(ValveState::Closed);
-        self.set_bladder_valve(ValveState::Closed);
-    }
-    fn set_main_valve(&mut self, state:ValveState){
-        match state {
-            ValveState::Open => self.pump_main_pin.set_high().unwrap(),
-            ValveState::Closed => self.pump_main_pin.set_low().unwrap(),
-        } 
-    }
-
-    fn set_bladder_valve(&mut self, state:ValveState){
-        match state {
-            ValveState::Open => self.pump_bladder_pin.set_high().unwrap(),
-            ValveState::Closed => self.pump_bladder_pin.set_low().unwrap(),
-        } 
-    }
-
-
-
-}
 // End of file
