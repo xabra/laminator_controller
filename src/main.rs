@@ -7,7 +7,6 @@
 #![no_std]
 #![no_main]
 
-
 use rp_pico::entry;     // Entry point macro
 use panic_halt as _;    // panic fuctionality
 
