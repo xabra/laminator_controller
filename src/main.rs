@@ -1,7 +1,6 @@
-//! # Controller
+//! # Laminator Controller
 //!
 //! Runs the custom laminator controller powered by the Pico W
-//!  Change something
 
 
 #![no_std]
@@ -17,9 +16,9 @@ use rp_pico::hal;
 use rp_pico::hal::gpio;
 use rp_pico::hal::gpio::Output;
 use rp_pico::hal::gpio::PushPull;
-use rp_pico::hal::gpio::bank0::Gpio12;
-use rp_pico::hal::spi;
-use fugit::RateExtU32;
+use rp_pico::hal::gpio::bank0::{Gpio11,Gpio12};
+//use rp_pico::hal::spi;
+//use fugit::RateExtU32;
 
 /// Entry point
 #[entry]
@@ -58,41 +57,67 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    // Set the pin to be an output
-    let chip_select = pins.gpio12.into_push_pull_output();
-    //let mut spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
+    // Setup two output pins for the valve controller
+    let pump_main_pin = pins.gpio12.into_push_pull_output();
+    let pump_bladder_pin = pins.gpio11.into_push_pull_output();
 
-    let mut spi_ctrl = SpiController::new(chip_select);
+    //Create the valve controller and initialize it.
+    let mut valve_controller = ValveController::new(pump_main_pin, pump_bladder_pin).init();
+
+    //let mut spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
+    //let mut spi_ctrl = ValveController::new(chip_select);
+
 
     // Main loop forever
     loop {
-        //chip_select.set_high().unwrap();
-        spi_ctrl.pin_high();
-        delay.delay_ms(2);
+        valve_controller.set_main_valve(ValveState::Open);
+        valve_controller.set_bladder_valve(ValveState::Closed);
+        delay.delay_ms(1);
 
-        //chip_select.set_low().unwrap();
-        spi_ctrl.pin_low();
-        delay.delay_ms(2);
+        valve_controller.set_main_valve(ValveState::Closed);
+        valve_controller.set_bladder_valve(ValveState::Open);
+        delay.delay_ms(1);
+
     }
 }
 
-pub struct SpiController {
-    cs_pin: gpio::Pin<Gpio12, Output<PushPull>>, // What is the type?
-    //spi:  // What is the type?
+pub struct ValveController {
+    pump_main_pin: gpio::Pin<Gpio12, Output<PushPull>>, 
+    pump_bladder_pin: gpio::Pin<Gpio11, Output<PushPull>>, 
 }
-
-impl SpiController {
-    fn new(cs:gpio::Pin<Gpio12, Output<PushPull>> ) -> SpiController {
-        SpiController{
-            cs_pin:cs
+enum ValveState {
+    Open,
+    Closed,
+}
+impl ValveController {
+    fn new(
+        pump_main_pin:gpio::Pin<Gpio12, Output<PushPull>>, 
+        pump_bladder_pin: gpio::Pin<Gpio11, Output<PushPull>>
+    ) -> ValveController {
+        ValveController{
+            pump_main_pin:pump_main_pin,
+            pump_bladder_pin:pump_bladder_pin
         }
     }
-    fn pin_high(&mut self){
-        self.cs_pin.set_high().unwrap();
+    fn init(&mut self) {
+        self.set_main_valve(ValveState::Closed);
+        self.set_bladder_valve(ValveState::Closed);
+    }
+    fn set_main_valve(&mut self, state:ValveState){
+        match state {
+            ValveState::Open => self.pump_main_pin.set_high().unwrap(),
+            ValveState::Closed => self.pump_main_pin.set_low().unwrap(),
+        } 
     }
 
-    fn pin_low(&mut self){
-        self.cs_pin.set_low().unwrap();
+    fn set_bladder_valve(&mut self, state:ValveState){
+        match state {
+            ValveState::Open => self.pump_bladder_pin.set_high().unwrap(),
+            ValveState::Closed => self.pump_bladder_pin.set_low().unwrap(),
+        } 
     }
+
+
+
 }
-// // End of file
+// End of file
