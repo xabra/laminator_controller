@@ -8,19 +8,31 @@
 
 pub mod valve_controller;
 
+use hal::pwm::FreeRunning;
+use hal::pwm::Pwm7;
 use rp_pico::entry;     // Entry point macro
 use panic_halt as _;    // panic fuctionality
 
 use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::PwmPin;
+
 use rp_pico::hal::prelude::*;
 use rp_pico::hal::pac;
 use rp_pico::hal;
+use rp2040_hal::pwm::Slice;
+use rp2040_hal::gpio::Pwm;
 use rp_pico::hal::gpio;
 use rp_pico::hal::gpio::Output;
 use rp_pico::hal::gpio::PushPull;
 use rp_pico::hal::gpio::bank0::{Gpio11,Gpio12};
+//use rp_pico::hal::pwm::{Gpio11,Gpio12};
+use crate::hal::pwm::{Channel, B};
+use crate::gpio::Pin;
+
 //use rp_pico::hal::spi;
 //use fugit::RateExtU32;
+
+// My use statments:
 use valve_controller::ValveState;
 use valve_controller::ValveController;
 
@@ -62,17 +74,32 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
+    // ----------- VALVE CONTROLLER SETUP ------------
     // Setup two output pins for the valve controller
     let pump_main_pin = pins.gpio12.into_push_pull_output();
     let pump_bladder_pin = pins.gpio11.into_push_pull_output();
 
     //Create the valve controller and initialize it.
     let mut valve_controller = ValveController::new(pump_main_pin, pump_bladder_pin);
+    // Seems kinda silly to pass in praticular gpio pins when they are already built into the ValveController struct via types.
+    // Should be one ot her other?
     valve_controller.init();
 
-    //let mut spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
-    //let mut spi_ctrl = ValveController::new(chip_select);
 
+    // ----------- PWM HEATER CONTROLLER SETUP ------------
+    // PWMs
+    // let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+    // let pwm = &mut pwm_slices.pwm7;
+    // pwm.set_ph_correct();
+    // pwm.set_div_int(255u8); // To set integer part of clock divider
+    // pwm.enable();
+
+    // // Output channel B on PWM7 to pin GPIO15
+    // let channel = &mut pwm.channel_b;
+    // channel.output_to(pins.gpio15);
+
+
+    // channel.set_duty(6000);
 
     // Main loop forever
     loop {
@@ -86,5 +113,23 @@ fn main() -> ! {
 
     }
 }
+
+// pub struct HeaterController<'a> {
+//     pwm: &'a mut Slice<Pwm7, FreeRunning>,
+//     channel: &'a mut Channel<Pwm7, FreeRunning, B>
+// }
+
+// impl<I,M> HeaterController {
+//     pub fn new(pwm: &mut Slice<Pwm7,FreeRunning>, pwm_pin:Pin<I,M>) -> HeaterController {
+//         pwm.set_ph_correct();
+//         pwm.set_div_int(255u8); // To set integer part of clock divider
+//         pwm.enable();
+
+//         // Output channel B on PWM7 to pin GPIO15
+//         let channel = &mut pwm.channel_b;
+//         channel.output_to(pwm_pin);
+//         HeaterController { pwm: pwm }
+//     }
+// }
 
 // End of file

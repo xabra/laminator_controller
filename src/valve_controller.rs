@@ -1,23 +1,23 @@
 
 use embedded_hal::digital::v2::OutputPin;
 use rp_pico::hal::gpio;
+use rp_pico::hal::gpio::PinId;
 use rp_pico::hal::gpio::Output;
 use rp_pico::hal::gpio::PushPull;
-use rp_pico::hal::gpio::bank0::{Gpio11,Gpio12};
 
-pub struct ValveController {
-    pump_main_pin: gpio::Pin<Gpio12, Output<PushPull>>, 
-    pump_bladder_pin: gpio::Pin<Gpio11, Output<PushPull>>, 
+pub struct ValveController<I: PinId, J: PinId> {
+    pump_main_pin: gpio::Pin<I, Output<PushPull>>, 
+    pump_bladder_pin: gpio::Pin<J, Output<PushPull>>, 
 }
 pub enum ValveState {
     Open,
     Closed,
 }
-impl ValveController {
+impl <I: PinId, J: PinId> ValveController<I, J> {
     pub fn new(
-        pump_main_pin:gpio::Pin<Gpio12, Output<PushPull>>, 
-        pump_bladder_pin: gpio::Pin<Gpio11, Output<PushPull>>
-    ) -> ValveController {
+        pump_main_pin:gpio::Pin<I, Output<PushPull>>, 
+        pump_bladder_pin: gpio::Pin<J, Output<PushPull>>
+    ) -> ValveController<I,J> {
         ValveController{
             pump_main_pin:pump_main_pin,
             pump_bladder_pin:pump_bladder_pin
