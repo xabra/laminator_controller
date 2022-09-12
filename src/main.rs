@@ -75,15 +75,11 @@ fn main() -> ! {
     );
 
     // ----------- VALVE CONTROLLER SETUP ------------
-    // Setup two output pins for the valve controller
-    let pump_main_pin = pins.gpio12.into_push_pull_output();
-    let pump_bladder_pin = pins.gpio11.into_push_pull_output();
-
-    //Create the valve controller and initialize it.
-    let mut valve_controller = ValveController::new(pump_main_pin, pump_bladder_pin);
-    // Seems kinda silly to pass in praticular gpio pins when they are already built into the ValveController struct via types.
-    // Should be one ot her other?
-    valve_controller.init();
+    // Create the valve controllers with the two pins and initialize them.
+    let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output());
+    main_chamber_valve.init();
+    let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());
+    bladder_valve.init();
 
 
     // ----------- PWM HEATER CONTROLLER SETUP ------------
@@ -103,12 +99,12 @@ fn main() -> ! {
 
     // Main loop forever
     loop {
-        valve_controller.set_main_valve(ValveState::Open);
-        valve_controller.set_bladder_valve(ValveState::Closed);
+        main_chamber_valve.set_state(ValveState::Vent);
+        bladder_valve.set_state(ValveState::Pump);
         delay.delay_ms(3);
 
-        valve_controller.set_main_valve(ValveState::Closed);
-        valve_controller.set_bladder_valve(ValveState::Open);
+        main_chamber_valve.set_state(ValveState::Pump);
+        bladder_valve.set_state(ValveState::Vent);
         delay.delay_ms(10);
 
     }
