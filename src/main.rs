@@ -2,37 +2,20 @@
 //!
 //! Runs the custom laminator controller powered by the Pico W
 
-
 #![no_std]
 #![no_main]
-
-pub mod valve_controller;
-
-use hal::pwm::FreeRunning;
-use hal::pwm::Pwm7;
-use rp_pico::entry;     // Entry point macro
 use panic_halt as _;    // panic fuctionality
 
-use embedded_hal::digital::v2::OutputPin;
-use embedded_hal::PwmPin;
-
+use rp_pico::entry;     // Entry point macro
 use rp_pico::hal::prelude::*;
 use rp_pico::hal::pac;
 use rp_pico::hal;
-use rp2040_hal::pwm::Slice;
-use rp2040_hal::gpio::Pwm;
-use rp_pico::hal::gpio;
-use rp_pico::hal::gpio::Output;
-use rp_pico::hal::gpio::PushPull;
-use rp_pico::hal::gpio::bank0::{Gpio11,Gpio12};
-//use rp_pico::hal::pwm::{Gpio11,Gpio12};
-use crate::hal::pwm::{Channel, B};
-use crate::gpio::Pin;
-
-//use rp_pico::hal::spi;
-//use fugit::RateExtU32;
+use embedded_hal::PwmPin;
+use rp_pico::hal::pwm::{Slice, SliceId, FreeRunning, Channel, B};
+use rp_pico::hal::gpio::{Pwm, Pin, PinId, Function};
 
 // My use statments:
+pub mod valve_controller;
 use valve_controller::ValveState;
 use valve_controller::ValveController;
 
@@ -75,7 +58,9 @@ fn main() -> ! {
     );
 
     // ----------- VALVE CONTROLLER SETUP ------------
-    // Create the valve controllers with the two pins and initialize them.
+    // Create the valve controllers and initialize them.
+    // Need to check logic polarity
+    // Might chain init()...
     let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output());
     main_chamber_valve.init();
     let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());
@@ -83,19 +68,24 @@ fn main() -> ! {
 
 
     // ----------- PWM HEATER CONTROLLER SETUP ------------
-    // PWMs
-    // let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
-    // let pwm = &mut pwm_slices.pwm7;
-    // pwm.set_ph_correct();
-    // pwm.set_div_int(255u8); // To set integer part of clock divider
-    // pwm.enable();
+    let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
-    // // Output channel B on PWM7 to pin GPIO15
-    // let channel = &mut pwm.channel_b;
-    // channel.output_to(pins.gpio15);
+    // Get a pwm slice (PWM7) from Slices and configure
+    let pwm_slice = &mut pwm_slices.pwm7;       
+    pwm_slice.set_ph_correct();
+    pwm_slice.set_div_int(255u8); // To set integer part of clock divider
+    pwm_slice.enable();
 
+    //Get a channel (B) from the slice
+    let channel = &mut pwm_slice.channel_b;   
 
-    // channel.set_duty(6000);
+    // Attach the channel outout to a pin (gpio15)
+    let pin = pins.gpio15;
+    channel.output_to(pin);
+
+    channel.set_duty(12000);
+
+    
 
     // Main loop forever
     loop {
@@ -110,21 +100,31 @@ fn main() -> ! {
     }
 }
 
-// pub struct HeaterController<'a> {
-//     pwm: &'a mut Slice<Pwm7, FreeRunning>,
-//     channel: &'a mut Channel<Pwm7, FreeRunning, B>
+// pub struct HeaterController<'a, S: SliceId, I:PinId + rp2040_hal::gpio::bank0::BankPinId> {
+//     pwm_slice: &'a mut Slice<S, FreeRunning>,
+//     pwm_channel: &'a  mut Channel<S, FreeRunning, B>,        // Temporarily hardcoded channel B...
+//     pwm_pin: Pin<I, Function<Pwm>>,
 // }
 
-// impl<I,M> HeaterController {
-//     pub fn new(pwm: &mut Slice<Pwm7,FreeRunning>, pwm_pin:Pin<I,M>) -> HeaterController {
-//         pwm.set_ph_correct();
-//         pwm.set_div_int(255u8); // To set integer part of clock divider
-//         pwm.enable();
+// impl<S: SliceId,  I:PinId + rp2040_hal::gpio::bank0::BankPinId + rp2040_hal::pwm::ValidPwmOutputPin<S, rp2040_hal::pwm::B>> HeaterController<'_, S, I> {
+//     pub fn new(pwm_slice: &mut Slice<S,FreeRunning>, pwm_pin: Pin<I, Function<Pwm>>) -> HeaterController<S, I> {
+//         pwm_slice.set_ph_correct();
+//         pwm_slice.set_div_int(255u8); // To set integer part of clock divider
+//         pwm_slice.enable();
 
-//         // Output channel B on PWM7 to pin GPIO15
-//         let channel = &mut pwm.channel_b;
-//         channel.output_to(pwm_pin);
-//         HeaterController { pwm: pwm }
+//         // // Output channel B on PWM7 to pin GPIO15
+//         let pwm_channel = &mut pwm_slice.channel_b;
+//         //let pin = pins.gpio15.into_mode::<rp_pico::hal::gpio::FunctionPwm>();
+//         pwm_channel.output_to(pwm_pin);
+
+//         HeaterController { 
+//             pwm_slice, 
+//             pwm_channel,
+//             pwm_pin,
+//         }
+//     }
+//     pub fn set_duty(&mut self, df: i32) {
+//         //self.pwm_channel.set_duty(df);
 //     }
 // }
 
