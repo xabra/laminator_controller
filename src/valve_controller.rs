@@ -5,13 +5,14 @@ use rp_pico::hal::gpio::PinId;
 use rp_pico::hal::gpio::Output;
 use rp_pico::hal::gpio::PushPull;
 
-pub struct ValveController<I: PinId> {
-    valve_pin: gpio::Pin<I, Output<PushPull>>, 
-}
 pub enum ValveState {
     Vent,
     Pump,
 }
+pub struct ValveController<I: PinId> {
+    valve_pin: gpio::Pin<I, Output<PushPull>>, 
+}
+
 impl <I: PinId> ValveController<I> {
     pub fn new(
         valve_pin:gpio::Pin<I, Output<PushPull>>, 
@@ -29,6 +30,4 @@ impl <I: PinId> ValveController<I> {
             ValveState::Pump => self.valve_pin.set_low().unwrap(),
         } 
     }
-
-
 }
