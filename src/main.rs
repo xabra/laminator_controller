@@ -4,6 +4,8 @@
 
 #![no_std]
 #![no_main]
+//use hal::gpio::PinMode;
+//use hal::pll::Disabled;
 use panic_halt as _;    // panic fuctionality
 
 use rp_pico::entry;     // Entry point macro
@@ -11,8 +13,8 @@ use rp_pico::hal::prelude::*;
 use rp_pico::hal::pac;
 use rp_pico::hal;
 use embedded_hal::PwmPin;
-use rp_pico::hal::pwm::{Slice, SliceId, FreeRunning, Channel, B};
-use rp_pico::hal::gpio::{Pwm, Pin, PinId, Function};
+use rp_pico::hal::pwm::{Slice, SliceId, FreeRunning, Channel, ChannelId, B};
+use rp_pico::hal::gpio::{Pwm, Pin, PinId, Function, FunctionPwm, Disabled, PullDown, Output, PushPull};
 
 // My use statments:
 pub mod valve_controller;
@@ -68,24 +70,25 @@ fn main() -> ! {
 
 
     // ----------- PWM HEATER CONTROLLER SETUP ------------
-    let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+    let pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
-    // Get a pwm slice (PWM7) from Slices and configure
-    let pwm_slice = &mut pwm_slices.pwm7;       
-    pwm_slice.set_ph_correct();
-    pwm_slice.set_div_int(255u8); // To set integer part of clock divider
-    pwm_slice.enable();
+    // Get individual pwm slices (PWM6, PWM7) from Slices
+    let pwm6_slice = &mut pwm_slices.pwm6;
+    let pwm7_slice = &mut pwm_slices.pwm7;
 
-    //Get a channel (B) from the slice
-    let channel = &mut pwm_slice.channel_b;   
+    // Create three pwm heater controlllers
+    // ?? Here I pass a mut reference pwm7_slice to two different functions.  Why no complaint from the borrow chechker???
+    let mut heater_ctr  = HeaterController::new(pwm7_slice, pwm7_slice.channel_b, pins.gpio15);
+    let mut heater_fb  = HeaterController::new(pwm7_slice, pwm7_slice.channel_a, pins.gpio14);
+    let mut heater_lr  = HeaterController::new(pwm6_slice, pwm6_slice.channel_b, pins.gpio13);
 
-    // Attach the channel outout to a pin (gpio15)
-    let pin = pins.gpio15;
-    channel.output_to(pin);
+    heater_ctr.init();
+    heater_fb.init();
+    heater_lr.init();
+    heater_ctr.set_duty(2000);
+    heater_fb.set_duty(3000);
+    heater_lr.set_duty(4000);
 
-    channel.set_duty(12000);
-
-    
 
     // Main loop forever
     loop {
@@ -100,32 +103,36 @@ fn main() -> ! {
     }
 }
 
-// pub struct HeaterController<'a, S: SliceId, I:PinId + rp2040_hal::gpio::bank0::BankPinId> {
-//     pwm_slice: &'a mut Slice<S, FreeRunning>,
-//     pwm_channel: &'a  mut Channel<S, FreeRunning, B>,        // Temporarily hardcoded channel B...
-//     pwm_pin: Pin<I, Function<Pwm>>,
-// }
+// A controller to encapsulate and manage a pwm heater channel
+pub struct HeaterController<'a, S: SliceId, C: ChannelId, I: PinId> {
+    pwm_slice: &'a mut Slice<S, FreeRunning>,
+    pwm_channel: Channel<S, FreeRunning, C>,
+    //pwm_pin: Pin<I, Disabled<PullDown>>,    // <===== IS THIS THE RIGHT PINMODE 'M' FOR PWM HERE? 
+    pwm_pin: Pin<I, FunctionPwm>,    // <===== IS THIS THE RIGHT PINMODE 'M' FOR PWM HERE? 
+}
 
-// impl<S: SliceId,  I:PinId + rp2040_hal::gpio::bank0::BankPinId + rp2040_hal::pwm::ValidPwmOutputPin<S, rp2040_hal::pwm::B>> HeaterController<'_, S, I> {
-//     pub fn new(pwm_slice: &mut Slice<S,FreeRunning>, pwm_pin: Pin<I, Function<Pwm>>) -> HeaterController<S, I> {
-//         pwm_slice.set_ph_correct();
-//         pwm_slice.set_div_int(255u8); // To set integer part of clock divider
-//         pwm_slice.enable();
+impl<S: SliceId, C: ChannelId, I: PinId> HeaterController<'_, S, C, I> {  
 
-//         // // Output channel B on PWM7 to pin GPIO15
-//         let pwm_channel = &mut pwm_slice.channel_b;
-//         //let pin = pins.gpio15.into_mode::<rp_pico::hal::gpio::FunctionPwm>();
-//         pwm_channel.output_to(pwm_pin);
+    pub fn new(pwm_slice: &mut Slice<S,FreeRunning>, pwm_channel:Channel<S, FreeRunning, C>, pwm_pin:Pin<I, Disabled<PullDown>>) -> HeaterController<S, C, I> {
+        HeaterController { 
+            pwm_slice, 
+            pwm_channel,
+            pwm_pin,
+        }
+    }
 
-//         HeaterController { 
-//             pwm_slice, 
-//             pwm_channel,
-//             pwm_pin,
-//         }
-//     }
-//     pub fn set_duty(&mut self, df: i32) {
-//         //self.pwm_channel.set_duty(df);
-//     }
-// }
+    pub fn init(&mut self){
+        self.pwm_slice.set_ph_correct();
+        self.pwm_slice.set_div_int(255u8); // To set integer part of clock divider
+        self.pwm_slice.enable();
+
+        self.pwm_channel.output_to(self.pwm_pin);  // <- rustc says no method names output_to.  Why?
+        self.pwm_channel.set_duty(0);               // <- rustc says no method names output_to.  Why?
+    }
+
+    pub fn set_duty(&mut self, df: i32){
+        self.pwm_channel.set_duty(df);              // <- rustc says no method names output_to.  Why?
+    }
+}
 
 // End of file
