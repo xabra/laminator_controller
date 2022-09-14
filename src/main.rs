@@ -4,15 +4,12 @@
 
 #![no_std]
 #![no_main]
-//use hal::gpio::PinMode;
-//use hal::pll::Disabled;
 use panic_halt as _;    // panic fuctionality
 
 use rp_pico::entry;     // Entry point macro
 use rp_pico::hal::prelude::*;
 use rp_pico::hal::pac;
 use rp_pico::hal;
-use embedded_hal::PwmPin;
 use rp_pico::hal::gpio::{Pwm, Pin, PinId, Function, FunctionPwm, Disabled, PullDown, Output, PushPull};
 // I2C HAL traits & Types.
 use embedded_hal::blocking::i2c::{Operation, Read, Transactional, Write};
@@ -20,13 +17,14 @@ use rp_pico::hal::rom_data::float_funcs::{fdiv, fmul, int_to_float};
 //use rp_pico::hal::spi;
 use fugit::RateExtU32;
 
-// My use statments:
+// My Valve Controller:
 pub mod valve_controller;
 use valve_controller::ValveState;
 use valve_controller::ValveController;
 
-pub mod heater_controller;
-use heater_controller::HeaterController;
+// My Heater Controller
+// pub mod heater_controller;
+// use heater_controller::HeaterController;
 
 
 /// Entry point
@@ -75,19 +73,15 @@ fn main() -> ! {
     let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());
     bladder_valve.init();
 
-
-    
-
-
     // Main loop forever
     loop {
         main_chamber_valve.set_state(ValveState::Vent);
         bladder_valve.set_state(ValveState::Pump);
-        delay.delay_ms(3);
+        delay.delay_ms(2000);
 
         main_chamber_valve.set_state(ValveState::Pump);
         bladder_valve.set_state(ValveState::Vent);
-        delay.delay_ms(10);
+        delay.delay_ms(1000);
 
     }
 }
