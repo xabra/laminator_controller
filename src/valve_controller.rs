@@ -15,13 +15,13 @@ pub struct ValveController<I: PinId> {
 
 impl <I: PinId> ValveController<I> {
     pub fn new(
-        valve_pin:gpio::Pin<I, Output<PushPull>>, 
+        valve_pin: gpio::Pin<I, Output<PushPull>>, 
     ) -> ValveController<I> {
         ValveController{
             valve_pin:valve_pin,
         }
     }
-    pub fn init(&mut self) {
+    pub fn init(&mut self)  {
         self.set_state(ValveState::Pump);
     }
     pub fn set_state(&mut self, state:ValveState){

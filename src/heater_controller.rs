@@ -34,3 +34,24 @@ impl<S: SliceId, C: ChannelId, I: PinId> HeaterController<'_, S, C, I> {
         self.pwm_channel.set_duty(df);              // <- rustc says no method names output_to.  Why?
     }
 }
+
+
+// // ----------- PWM HEATER CONTROLLER SETUP ------------
+// let pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+
+// // Get individual pwm slices (PWM6, PWM7) from Slices
+// let pwm6_slice = &mut pwm_slices.pwm6;
+// let pwm7_slice = &mut pwm_slices.pwm7;
+
+// // Create three pwm heater controlllers
+// // ?? Here I pass a mut reference pwm7_slice to two different functions.  Why no complaint from the borrow chechker???
+// let mut heater_ctr  = HeaterController::new(pwm7_slice, pwm7_slice.channel_b, pins.gpio15);
+// let mut heater_fb  = HeaterController::new(pwm7_slice, pwm7_slice.channel_a, pins.gpio14);
+// let mut heater_lr  = HeaterController::new(pwm6_slice, pwm6_slice.channel_b, pins.gpio13);
+
+// heater_ctr.init();
+// heater_fb.init();
+// heater_lr.init();
+// heater_ctr.set_duty(2000);
+// heater_fb.set_duty(3000);
+// heater_lr.set_duty(4000);
