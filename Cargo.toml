@@ -13,6 +13,28 @@ embedded-hal ="0.2.7"
 cortex-m-rt = "0.7.1" 
 fugit = "0.3.6"
 rp2040-hal = "0.6.0"
+defmt = "0.3.2"
+defmt-rtt = "0.3.2"
 [dev-dependencies]
 
 [features]
+
+# cargo build/run
+[profile.dev]
+codegen-units = 1
+debug = 2
+debug-assertions = true
+incremental = false
+# >>> opt-level = 3, changed to 1 for interactive debug
+opt-level = 1
+overflow-checks = true
+
+# cargo build/run --release
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 3
+overflow-checks = false

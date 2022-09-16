@@ -31,6 +31,10 @@ rustflags = [
     "-C", "link-arg=-Tlink.x",
     "-C", "inline-threshold=5",
     "-C", "no-vectorize-loops",
+    # ----- Added these:
+    "-C", "linker=flip-link",
+    "-C", "link-arg=-Tdefmt.x",
+    # ----------
 ]
 
 # This runner will make a UF2 file and then copy it to a mounted RP2040 in USB
@@ -40,3 +44,7 @@ rustflags = [
 # This runner will find a supported SWD debug probe and flash your RP2040 over
 # SWD:
 runner = "probe-run --chip RP2040"
+
+[env]
+DEFMT_LOG = "debug"
+# DEFMT_LOG = "off"
