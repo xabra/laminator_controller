@@ -4,40 +4,48 @@ use rp2040_hal::spi::SpiDevice;
 use rp_pico::hal::gpio;
 use rp_pico::hal::gpio::{PinId, Output, PushPull};
 use rp_pico::hal::spi::{Spi, Enabled};
+
 // Logging stuff..
 use defmt::*;
 use defmt_rtt as _;
 
 use ChipSelectState::{Selected, Deselected};
-use TCId::{Center, LeftRight, FrontBack};
+use TCChannel::{Center, LeftRight, FrontBack};
 
 // Constants
 const HIGH_WORD_DATA_MASK:u16 = 0b1111_1111_1111_1100;
 const LOW_WORD_DATA_MASK:u16 = 0b1111_1111_1111_1000;
 const TC_ERROR_MASK:u16 = 0b0000_0000_0000_0001;// Some TC error.  Unused for now.
-const OC_MASK:u16 = 0b0000_0000_0000_0001;      // Open Circuit error
-const SCG_MASK:u16 = 0b0000_0000_0000_0010;     // Short Circuit to GND error
-const SCV_MASK:u16 = 0b0000_0000_0000_0100;     // Short Circuit to VCC error
+const OC_ERROR_MASK:u16 = 0b0000_0000_0000_0001;      // Open Circuit error
+const SCG_ERROR_MASK:u16 = 0b0000_0000_0000_0010;     // Short Circuit to GND error
+const SCV_ERROR_MASK:u16 = 0b0000_0000_0000_0100;     // Short Circuit to VCC error
 
+
+#[derive(Debug, Copy, Clone)]
 pub enum ChipSelectState {
     Selected,
     Deselected,
 }
 
 // Give the T/Cs names
-pub enum TCId {
+#[derive(Debug, Copy, Clone, Format)]
+pub enum TCChannel {
     Center,
     LeftRight,
     FrontBack,
 }
+#[derive(Debug, Copy, Clone, Format)]
 pub enum TCError {
     TempSensorShortToVCC,
     TempSensorShortToGND,
     TempSensorOpenCircuit,
 }
+#[derive(Debug, Copy, Clone, Format)]
 pub struct Temperatures {
+    pub channel: TCChannel,
     pub tc_temp: f32,
     pub ref_temp: f32,
+    pub error: Option<TCError>,
 }
 // Lousy code- should use anypin...
 pub struct ThermocoupleController<I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> {
@@ -54,6 +62,7 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
         cs_fb: gpio::Pin<I3, Output<PushPull>>,
         spi: Spi<Enabled, D, 16>) 
         -> ThermocoupleController<I1, I2, I3, D> {
+
         ThermocoupleController{
             cs_ctr,
             cs_lr,
@@ -62,24 +71,27 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
         }
     }
 
-    pub fn read_temps(&mut self) -> Result<Temperatures, TCError> {
-        let (w0,w1) = self.read_raw();
-        info!("RAW ::: Temp: {=u16}   Ref Temp:{=u16}", w0, w1);
+    // Init: set all chip-selects to Deselected
+    pub fn init(&mut self){
+        self.deselect_all ();
+    }
+
+    pub fn read_temps(&mut self, channel: TCChannel) -> Temperatures {
+        // Read raw data
+        let (w0,w1) = self.read_raw(channel);
+
+        //info!("RAW ::: Temp: {=u16}   Ref Temp:{=u16}", w0, w1);
         match self.get_tc_error(w1) {
-            Some(err) => return Err(err),
+            Some(error) => {
+                return Temperatures { channel, tc_temp:0.0, ref_temp: 0.0,  error: Some(error)}
+            },
             None => {
                 let tc_temp = self.tc_temperature_degc(w0);
                 let ref_temp = self.ref_temperature_degc(w1);
-                info!("READ TEMPS::: Temp: {=f32}   Ref Temp:{=f32}", tc_temp, ref_temp);
-                Ok(Temperatures { tc_temp, ref_temp })
+                //info!("READ TEMPS::: Temp: {=f32}   Ref Temp:{=f32}", tc_temp, ref_temp);
+                return Temperatures { channel, tc_temp, ref_temp, error: None};
             }
         }
-    }
-
-    // Select only one chip select, by first deselecting all to prevent bus contention
-    pub fn set_exclusive_chip_select (&mut self, tc: TCId, state:ChipSelectState) {
-        self.deselect_all();
-        self.set_chip_select(tc, Selected);
     }
     
     // Deselect all chip selects
@@ -92,8 +104,8 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
     // Low-level function to set the chip select line of one tc to specified state
     // Does NOT enforce exclusivity.
     // Lousy code --> use anypin or something...
-    fn set_chip_select(&mut self, tc: TCId, state:ChipSelectState){
-        match tc {
+    fn set_chip_select(&mut self, channel: TCChannel, state:ChipSelectState){
+        match channel {
             Center => {
                 match state {
                     Deselected => self.cs_ctr.set_high().unwrap(),
@@ -116,15 +128,16 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
 
     }
 
-    fn read_raw(&mut self) -> (u16, u16) {
+    // Select chip select, SPI read both temp words, deselect chip select
+    fn read_raw(&mut self, channel: TCChannel) -> (u16, u16) {
         let buf = &mut [0x0000u16, 0x0000u16];   // Must write any data to chip to read data.
-        self.set_chip_select(Center, Selected);       // Assert chip select 
+        self.set_chip_select(channel, Selected);       // Assert chip select 
         let raw = self.spi.transfer( buf).unwrap(); // transfer 2 16 bit words out/in.
-        self.set_chip_select(Center, Deselected);     // De-assert chip select
+        self.set_chip_select(channel, Deselected);     // De-assert chip select
        
         (raw[0], raw[1])
     }
-
+    // Compute the temp from raw temp
     fn tc_temperature_degc(&self, high_word: u16) -> f32 { 
         // Clear the lowest two bits (reserved and fault bit)
         // and convert to signed int using the same length word
@@ -137,6 +150,7 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
         return temp;
     }
     
+    // Compute the ref temp from raw ref temp
     fn ref_temperature_degc(&self, low_word: u16) -> f32 { 
         // Clear the lowest three bits (fault code bits)
         // and convert to signed int using the same length word
@@ -147,17 +161,19 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
         
         return temp;
     }
-
-    fn is_tc_error(&self, high_word: u16) -> bool { 
+    // Test one bit in high word to determine if any TC error ocurred
+    // Useful in cases where only one (high) word is read for speed
+    fn _is_tc_error(&self, high_word: u16) -> bool { 
         return high_word & TC_ERROR_MASK == 1;
     }
     
+    // Tests low word for detailed TC error report
     fn get_tc_error(&self, low_word: u16) -> Option<TCError> {     
-        if OC_MASK & low_word != 0 {
+        if OC_ERROR_MASK & low_word != 0 {
             return Some(TCError::TempSensorOpenCircuit);
-        }else if SCG_MASK & low_word != 0 {
+        }else if SCG_ERROR_MASK & low_word != 0 {
             return Some(TCError::TempSensorShortToGND);
-        } else if SCV_MASK & low_word != 0 {
+        } else if SCV_ERROR_MASK & low_word != 0 {
             return Some(TCError::TempSensorShortToVCC);
         }
         

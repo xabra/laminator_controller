@@ -4,7 +4,6 @@
 
 #![no_std]
 #![no_main]
-use thermocouple_controller::ChipSelectState;
 use panic_halt as _;    // panic fuctionality
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
@@ -31,7 +30,7 @@ use valve_controller::ValveController;
 
 // My Thermocouple Controller
  pub mod thermocouple_controller;
- use thermocouple_controller::{ThermocoupleController, TCError, TCId};
+ use thermocouple_controller::{ThermocoupleController, TCError, TCChannel};
 
 
 /// Entry point
@@ -80,14 +79,11 @@ fn main() -> ! {
     let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());
     bladder_valve.init();
 
-    // ----------- SPI, DriverMax31855 SETUP ------------
+    // ----------- THERMOCOUPLE CONTROLER SETUP ------------
     // Chip select pins
-    let mut cs_ctr = pins.gpio17.into_push_pull_output();
-    cs_ctr.set_high().unwrap();
-    let mut cs_lr = pins.gpio19.into_push_pull_output();
-    cs_lr.set_high().unwrap();
-    let mut cs_fb = pins.gpio20.into_push_pull_output();
-    cs_fb.set_high().unwrap();
+    let cs_ctr = pins.gpio17.into_push_pull_output();
+    let cs_lr = pins.gpio19.into_push_pull_output();
+    let cs_fb = pins.gpio20.into_push_pull_output();
 
     // Set up SPI CLK and DataIn Lines.  These are implicitly used by the spi driver if they are in the correct mode
     let _spi_sclk = pins.gpio18.into_mode::<gpio::FunctionSpi>();
@@ -98,26 +94,20 @@ fn main() -> ! {
     let spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
 
     let mut tc_controller = ThermocoupleController::new(cs_ctr, cs_lr, cs_fb, spi);
+    tc_controller.init();
 
-
+    let mut temps = tc_controller.read_temps(TCChannel::Center);
     // Main loop forever
     loop {
-        // let temp_result = tc_controller.read_temps();
-        // match temp_result {
-        //     Ok(temps) => info!("Temp: {=f32}   Ref Temp:{=f32}", temps.tc_temp, temps.ref_temp),
-        //     Err(e) => match e {
-        //         TCError::TempSensorShortToVCC => {info!("Shorted to VCC");}
-        //         TCError::TempSensorShortToGND => {info!("Shorted to GND");}
-        //         TCError::TempSensorOpenCircuit => {info!("Open Circuit");}
-        //     }
-        // }
-        tc_controller.set_exclusive_chip_select(TCId::Center, ChipSelectState::Selected);
+        temps = tc_controller.read_temps(TCChannel::Center);
+        info!("Channel: {:?} \t\tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+        temps = tc_controller.read_temps(TCChannel::LeftRight);
+        info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+        temps = tc_controller.read_temps(TCChannel::FrontBack);
+        info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+        println!("------");
         delay.delay_ms(1000);
-        tc_controller.set_exclusive_chip_select(TCId::LeftRight, ChipSelectState::Selected);
-        delay.delay_ms(1000);
-        tc_controller.set_exclusive_chip_select(TCId::FrontBack, ChipSelectState::Selected);
-        delay.delay_ms(1000);
-        tc_controller.set_exclusive_chip_select(TCId::FrontBack, ChipSelectState::Deselected);
+
     }
 }
 
