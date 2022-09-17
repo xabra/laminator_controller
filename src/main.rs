@@ -4,6 +4,7 @@
 
 #![no_std]
 #![no_main]
+use driver_max31855::ChipSelectState;
 use panic_halt as _;    // panic fuctionality
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
@@ -30,8 +31,7 @@ use valve_controller::ValveController;
 
 // My Thermocouple Controller
  pub mod driver_max31855;
- use driver_max31855::DriverMax31855;
- use driver_max31855::TCError;
+ use driver_max31855::{DriverMax31855, TCError, TCId};
 
 
 /// Entry point
@@ -97,22 +97,27 @@ fn main() -> ! {
     // Set up spi
     let spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
 
-    let mut tc_driver_ctr = DriverMax31855::new(cs_ctr, spi);
-
+    let mut tc_controller = DriverMax31855::new(cs_ctr, cs_lr, cs_fb, spi);
 
 
     // Main loop forever
     loop {
-        let temp_result = tc_driver_ctr.read_temps();
-        match temp_result {
-            Ok(temps) => info!("Temp: {=f32}   Ref Temp:{=f32}", temps.tc_temp, temps.ref_temp),
-            Err(e) => match e {
-                TCError::TempSensorShortToVCC => {info!("Shorted to VCC");}
-                TCError::TempSensorShortToGND => {info!("Shorted to GND");}
-                TCError::TempSensorOpenCircuit => {info!("Open Circuit");}
-            }
-        }
+        // let temp_result = tc_controller.read_temps();
+        // match temp_result {
+        //     Ok(temps) => info!("Temp: {=f32}   Ref Temp:{=f32}", temps.tc_temp, temps.ref_temp),
+        //     Err(e) => match e {
+        //         TCError::TempSensorShortToVCC => {info!("Shorted to VCC");}
+        //         TCError::TempSensorShortToGND => {info!("Shorted to GND");}
+        //         TCError::TempSensorOpenCircuit => {info!("Open Circuit");}
+        //     }
+        // }
+        tc_controller.set_exclusive_chip_select(TCId::Center, ChipSelectState::Selected);
         delay.delay_ms(1000);
+        tc_controller.set_exclusive_chip_select(TCId::LeftRight, ChipSelectState::Selected);
+        delay.delay_ms(1000);
+        tc_controller.set_exclusive_chip_select(TCId::FrontBack, ChipSelectState::Selected);
+        delay.delay_ms(1000);
+        tc_controller.set_exclusive_chip_select(TCId::FrontBack, ChipSelectState::Deselected);
     }
 }
 

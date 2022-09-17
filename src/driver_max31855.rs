@@ -8,21 +8,27 @@ use rp_pico::hal::spi::{Spi, Enabled};
 use defmt::*;
 use defmt_rtt as _;
 
-
-
 use ChipSelectState::{Selected, Deselected};
+use TCId::{Center, LeftRight, FrontBack};
 
 // Constants
 const HIGH_WORD_DATA_MASK:u16 = 0b1111_1111_1111_1100;
 const LOW_WORD_DATA_MASK:u16 = 0b1111_1111_1111_1000;
-const TC_ERROR_MASK:u16 = 0x0001_u16;
-const OC_MASK:u16 = 0x0001_u16;
-const SCG_MASK:u16 = 0x0002_u16;
-const SCV_MASK:u16 = 0x0004_u16;
+//const TC_ERROR_MASK:u16 = 0b0000_0000_0000_0001;// Some TC error.  Unused for now.
+const OC_MASK:u16 = 0b0000_0000_0000_0001;      // Open Circuit error
+const SCG_MASK:u16 = 0b0000_0000_0000_0010;     // Short Circuit to GND error
+const SCV_MASK:u16 = 0b0000_0000_0000_0100;     // Short Circuit to VCC error
 
 pub enum ChipSelectState {
     Selected,
     Deselected,
+}
+
+// Give the T/Cs names
+pub enum TCId {
+    Center,
+    LeftRight,
+    FrontBack,
 }
 pub enum TCError {
     TempSensorShortToVCC,
@@ -33,15 +39,25 @@ pub struct Temperatures {
     pub tc_temp: f32,
     pub ref_temp: f32,
 }
-pub struct DriverMax31855<I: PinId, D: SpiDevice> {
-    cs: gpio::Pin<I, Output<PushPull>>,
+// Lousy code- should use anypin...
+pub struct DriverMax31855<I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> {
+    cs_ctr: gpio::Pin<I1, Output<PushPull>>,
+    cs_lr: gpio::Pin<I2, Output<PushPull>>,
+    cs_fb: gpio::Pin<I3, Output<PushPull>>,
     spi: Spi<Enabled, D, 16>,
 }
 
-impl <I: PinId, D: SpiDevice> DriverMax31855<I, D> {
-    pub fn new(cs: gpio::Pin<I, Output<PushPull>>, spi: Spi<Enabled, D, 16>) -> DriverMax31855<I, D> {
+impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> DriverMax31855<I1, I2, I3, D> {
+    pub fn new(
+        cs_ctr: gpio::Pin<I1, Output<PushPull>>, 
+        cs_lr: gpio::Pin<I2, Output<PushPull>>,
+        cs_fb: gpio::Pin<I3, Output<PushPull>>,
+        spi: Spi<Enabled, D, 16>) 
+        -> DriverMax31855<I1, I2, I3, D> {
         DriverMax31855{
-            cs,
+            cs_ctr,
+            cs_lr,
+            cs_fb,
             spi,
         }
     }
@@ -60,18 +76,51 @@ impl <I: PinId, D: SpiDevice> DriverMax31855<I, D> {
         }
     }
 
-    fn set_chip_select(&mut self, state:ChipSelectState){
-        match state {
-            ChipSelectState::Deselected => self.cs.set_high().unwrap(),
-            ChipSelectState::Selected => self.cs.set_low().unwrap(),
-        } 
+    // Select only one chip select, by first deselecting all to prevent bus contention
+    pub fn set_exclusive_chip_select (&mut self, tc: TCId, state:ChipSelectState) {
+        self.deselect_all();
+        self.set_chip_select(tc, Selected);
+    }
+    
+    // Deselect all chip selects
+    fn deselect_all (&mut self) {
+        self.set_chip_select(Center, Deselected);
+        self.set_chip_select(LeftRight, Deselected);
+        self.set_chip_select(FrontBack, Deselected);
+    }
+
+    // Low-level function to set the chip select line of one tc to specified state
+    // Does NOT enforce exclusivity.
+    // Lousy code --> use anypin or something...
+    fn set_chip_select(&mut self, tc: TCId, state:ChipSelectState){
+        match tc {
+            Center => {
+                match state {
+                    Deselected => self.cs_ctr.set_high().unwrap(),
+                    Selected => self.cs_ctr.set_low().unwrap(),
+                } 
+            },
+            LeftRight => {
+                match state {
+                    Deselected => self.cs_lr.set_high().unwrap(),
+                    Selected => self.cs_lr.set_low().unwrap(),
+                } 
+            },
+            FrontBack => {
+                match state {
+                    Deselected => self.cs_fb.set_high().unwrap(),
+                    Selected => self.cs_fb.set_low().unwrap(),
+                } 
+            },
+        }
+
     }
 
     fn read_raw(&mut self) -> (u16, u16) {
         let buf = &mut [0x0000u16, 0x0000u16];   // Must write any data to chip to read data.
-        self.set_chip_select(Selected);       // Assert chip select 
+        self.set_chip_select(Center, Selected);       // Assert chip select 
         let raw = self.spi.transfer( buf).unwrap(); // transfer 2 16 bit words out/in.
-        self.set_chip_select(Deselected);     // De-assert chip select
+        self.set_chip_select(Center, Deselected);     // De-assert chip select
        
         (raw[0], raw[1])
     }
