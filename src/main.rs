@@ -4,7 +4,7 @@
 
 #![no_std]
 #![no_main]
-use driver_max31855::ChipSelectState;
+use thermocouple_controller::ChipSelectState;
 use panic_halt as _;    // panic fuctionality
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
@@ -30,8 +30,8 @@ pub mod valve_controller;
 use valve_controller::ValveController;
 
 // My Thermocouple Controller
- pub mod driver_max31855;
- use driver_max31855::{DriverMax31855, TCError, TCId};
+ pub mod thermocouple_controller;
+ use thermocouple_controller::{ThermocoupleController, TCError, TCId};
 
 
 /// Entry point
@@ -97,7 +97,7 @@ fn main() -> ! {
     // Set up spi
     let spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
 
-    let mut tc_controller = DriverMax31855::new(cs_ctr, cs_lr, cs_fb, spi);
+    let mut tc_controller = ThermocoupleController::new(cs_ctr, cs_lr, cs_fb, spi);
 
 
     // Main loop forever
