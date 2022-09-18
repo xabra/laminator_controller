@@ -3,9 +3,7 @@
 use embedded_hal::blocking::i2c::{Read, Write};
 use embedded_hal::digital::v2::OutputPin;
 use rp_pico::hal::gpio;
-use rp_pico::hal::i2c::I2C;
-use rp_pico::hal::gpio::{PinId, Pin, Input, Output, PushPull, FunctionI2C, Floating};
-use fugit::RateExtU32;
+use rp_pico::hal::gpio::{PinId, Input, Output, PushPull, Floating};
 
 const I2C_BUS_ADDRESS:u8 = 0b_0010_0000; // AD7994 i2c bus address
 const I2C_CONFIG_REG_ADDRESS:u8 = 0b_0000_0010;  // Select the Config register for write
@@ -15,19 +13,19 @@ const I2C_CONVERSION_RESULT_DATA_MASK:u16 = 0b_0000_1111_1111_1111; // Mask off 
 const I2C_CONVERSION_RESULT_CHANNEL_MASK:u8 = 0b_0000_0011; // Mask off 
 const PRESSURE_SENSE_VREF:f32 = 5.0;
 
-pub struct PressureSensorController<I1: PinId, I2: PinId, P: Read + Write> {    // <????>
+pub struct PressureSensorController<I1: PinId, I2: PinId, P: Read + Write> { 
     ad_start_pin: gpio::Pin<I1, Output<PushPull>>,
     ad_busy_pin: gpio::Pin<I2, Input<Floating>>,
-    i2c: P,       // <????>
+    i2c: P,      
 }
 
- impl <I1: PinId, I2: PinId, P: Read+Write> PressureSensorController<I1, I2, P>  // <????>
+ impl <I1: PinId, I2: PinId, P: Read+Write> PressureSensorController<I1, I2, P>  //
  {
     pub fn new (
         ad_start_pin: gpio::Pin<I1, Output<PushPull>>,
         ad_busy_pin: gpio::Pin<I2, Input<Floating>>,
-        i2c: P,      // <????>
-    ) -> PressureSensorController<I1, I2, P> {  // <????>
+        i2c: P,
+    ) -> PressureSensorController<I1, I2, P> {  
 
         PressureSensorController {
             ad_start_pin,
@@ -35,7 +33,7 @@ pub struct PressureSensorController<I1: PinId, I2: PinId, P: Read + Write> {    
             i2c,
         }
     }
-    pub fn init(&self) {
+    pub fn init(&self)  {
         // Set ad start pin low
         self.ad_start_pin.set_low().unwrap();
 
@@ -46,7 +44,7 @@ pub struct PressureSensorController<I1: PinId, I2: PinId, P: Read + Write> {    
         self.i2c.write(I2C_BUS_ADDRESS, &[I2C_CONVERSION_RESULT_REG_ADDRESS]).unwrap();   
     
     }
-    fn start_conversion(&self) {
+    fn start_conversion(&self, delay: cortex_m::delay::Delay) {
         // Generate conversion start pulse.
         self.ad_start_pin.set_high().unwrap();   // Power up the converter
         delay.delay_us(3);    // Remain high for minimum pulse width (~1us)
@@ -54,9 +52,9 @@ pub struct PressureSensorController<I1: PinId, I2: PinId, P: Read + Write> {    
         delay.delay_us(3);    // Delay for conversion to finish before i2c reading (~2us)
     }
 
-    pub fn read_pressures(&self) {
+    pub fn read_pressures(&self, delay: cortex_m::delay::Delay) {
         let mut read_result = [0; 2];
-        self.start_conversion();
+        self.start_conversion(delay);
 
         // Do i2c read from conversion
         self.i2c.read(I2C_BUS_ADDRESS, &mut read_result).unwrap();

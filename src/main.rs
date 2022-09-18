@@ -129,6 +129,9 @@ fn main() -> ! {
         info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
         temps = tc_controller.read_temps(TCChannel::FrontBack);
         info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+
+        pressure_sensor_controller.read_pressures(delay);
+        
         println!("------");
         delay.delay_ms(1000);
 
