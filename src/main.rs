@@ -15,7 +15,6 @@ use rp_pico::hal::gpio;
 use rp_pico::hal::gpio::{Pwm, Pin, Pins, PinId, Function, FunctionPwm, Disabled, PullDown, Output, PushPull};
 // I2C HAL traits & Types.
 use embedded_hal::blocking::i2c::{Operation, Read, Transactional, Write};
-use rp_pico::hal::rom_data::float_funcs::{fdiv, fmul, int_to_float};
 use rp_pico::hal::spi;
 use fugit::RateExtU32;
 
@@ -23,15 +22,18 @@ use fugit::RateExtU32;
 use defmt::*;
 use defmt_rtt as _;
 
-// My Valve Controller:
+// Valve Controller:
 pub mod valve_controller;
 //use valve_controller::ValveState;
 use valve_controller::ValveController;
 
-// My Thermocouple Controller
- pub mod thermocouple_controller;
- use thermocouple_controller::{ThermocoupleController, TCError, TCChannel};
+// Thermocouple Controller
+pub mod thermocouple_controller;
+use thermocouple_controller::{ThermocoupleController, TCError, TCChannel};
 
+// Pressure Sensor Controller
+pub mod pressure_sensor_controller;
+use pressure_sensor_controller::PressureSensorController;
 
 /// Entry point
 #[entry]
@@ -57,7 +59,7 @@ fn main() -> ! {
     .unwrap();
 
     // Delay object
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    let delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
     // The single-cycle I/O block controls our GPIO pins
     let sio = hal::Sio::new(pac.SIO);
@@ -95,6 +97,28 @@ fn main() -> ! {
 
     let mut tc_controller = ThermocoupleController::new(cs_ctr, cs_lr, cs_fb, spi);
     tc_controller.init();
+
+    // --------------- PRESSURE SENSOR CONTROLLER -----------
+    // Configure the auxiliary pins
+    let mut ad_start_pin = pins.gpio6.into_push_pull_output();      // Active low??
+    let mut ad_busy_pin = pins.gpio7.into_floating_input();        // AD Alert/Busy pin
+
+    // Configure sda & scl pins for I2C
+    let sda_pin = pins.gpio4.into_mode::<gpio::FunctionI2C>();
+    let scl_pin = pins.gpio5.into_mode::<gpio::FunctionI2C>();
+
+    // Configure the I2C0 device
+    let i2c = rp2040_hal::I2C::i2c0(
+        pac.I2C0,
+        sda_pin,
+        scl_pin,
+        400.kHz(),
+        &mut pac.RESETS,
+        &clocks.peripheral_clock,
+    );
+
+    // Create new PressureSensorController
+    let pressure_sensor_controller = PressureSensorController::new(ad_start_pin, ad_busy_pin, i2c);
 
     let mut temps = tc_controller.read_temps(TCChannel::Center);
     // Main loop forever
