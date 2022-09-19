@@ -4,6 +4,7 @@
 
 #![no_std]
 #![no_main]
+
 use panic_halt as _;    // panic fuctionality
 
 use rp_pico::entry;     // Entry point macro
@@ -19,6 +20,7 @@ use fugit::RateExtU32;
 use defmt::*;
 use defmt_rtt as _;
 
+
 // Valve Controller:
 pub mod valve_controller;
 //use valve_controller::ValveState;
@@ -31,6 +33,7 @@ use thermocouple_controller::{ThermocoupleController, TCChannel};
 // Pressure Sensor Controller
 pub mod pressure_sensor_controller;
 use pressure_sensor_controller::PressureSensorController;
+
 
 /// Entry point
 #[entry]
@@ -55,7 +58,9 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
+
     // Delay object
+    //let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
     let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
     // The single-cycle I/O block controls our GPIO pins
@@ -116,6 +121,7 @@ fn main() -> ! {
 
     // Create new PressureSensorController
     let mut pressure_sensor_controller = PressureSensorController::new(ad_start_pin, ad_busy_pin, i2c);
+    pressure_sensor_controller.init();
 
     let mut temps = tc_controller.read_temps(TCChannel::Center);
     // Main loop forever
@@ -127,7 +133,8 @@ fn main() -> ! {
         temps = tc_controller.read_temps(TCChannel::FrontBack);
         info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
 
-        pressure_sensor_controller.read_pressures(delay);
+        let measurement = pressure_sensor_controller.read_pressures();
+        info!("PRESSURE----Channel: {:?} \tPressure: {=f32}", measurement.channel_index, measurement.pressure_pa);
 
         println!("------");
         delay.delay_ms(1000);
