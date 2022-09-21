@@ -1,146 +1,89 @@
-//! # Laminator Controller
-//!
-//! Runs the custom laminator controller powered by the Pico W
-
 #![no_std]
 #![no_main]
 
-use panic_halt as _;    // panic fuctionality
+use panic_halt as _;
 
-use rp_pico::entry;     // Entry point macro
-use rp_pico::hal::prelude::*;
-use rp_pico::hal::pac;
-use rp_pico::hal;
-use rp_pico::hal::gpio;
-// I2C HAL traits & Types.
-use rp_pico::hal::spi;
-use fugit::RateExtU32;
-
-// Logging stuff..
-use defmt::*;
 use defmt_rtt as _;
 
+#[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
+mod app {
 
-// Valve Controller:
-pub mod valve_controller;
-//use valve_controller::ValveState;
-use valve_controller::ValveController;
+    use embedded_hal::digital::v2::OutputPin;
+    use fugit::MicrosDurationU32;
+    use rp_pico::{
+        hal::{self, clocks::init_clocks_and_plls, timer::Alarm, watchdog::Watchdog, Sio},
+        XOSC_CRYSTAL_FREQ,
+    };
 
-// Thermocouple Controller
-pub mod thermocouple_controller;
-use thermocouple_controller::{ThermocoupleController, TCChannel};
+    const SCAN_TIME_US: MicrosDurationU32 = MicrosDurationU32::secs(1);
 
-// Pressure Sensor Controller
-pub mod pressure_sensor_controller;
-use pressure_sensor_controller::PressureSensorController;
+    #[shared]
+    struct Shared {
+        timer: hal::Timer,
+        alarm: hal::timer::Alarm0,
+        pin0: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio0, hal::gpio::PushPullOutput>,
+    }
 
+    #[local]
+    struct Local {}
 
-/// Entry point
-#[entry]
-fn main() -> ! {
-    // Grab our singleton objects
-    let mut pac = pac::Peripherals::take().unwrap();
-    let core = pac::CorePeripherals::take().unwrap();
+    #[init]
+    fn init(c: init::Context) -> (Shared, Local, init::Monotonics) {
+        // Soft-reset does not release the hardware spinlocks
+        // Release them now to avoid a deadlock after debug or watchdog reset
+        unsafe {
+            hal::sio::spinlock_reset();
+        }
+        let mut resets = c.device.RESETS;
+        let mut watchdog = Watchdog::new(c.device.WATCHDOG);
+        let _clocks = init_clocks_and_plls(
+            XOSC_CRYSTAL_FREQ,
+            c.device.XOSC,
+            c.device.CLOCKS,
+            c.device.PLL_SYS,
+            c.device.PLL_USB,
+            &mut resets,
+            &mut watchdog,
+        )
+        .ok()
+        .unwrap();
 
-    // Set up the watchdog driver - needed by the clock setup code
-    let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
+        let sio = Sio::new(c.device.SIO);
+        let pins = rp_pico::Pins::new(
+            c.device.IO_BANK0,
+            c.device.PADS_BANK0,
+            sio.gpio_bank0,
+            &mut resets,
+        );
+        let mut pin0 = pins.gpio0.into_push_pull_output();
+        pin0.set_low().unwrap();
 
-    // Configure the clocks - default is 125 MHz system clock
-    let clocks = hal::clocks::init_clocks_and_plls(
-        rp_pico::XOSC_CRYSTAL_FREQ,
-        pac.XOSC,
-        pac.CLOCKS,
-        pac.PLL_SYS,
-        pac.PLL_USB,
-        &mut pac.RESETS,
-        &mut watchdog,
-    )
-    .ok()
-    .unwrap();
+        let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
+        let mut alarm = timer.alarm_0().unwrap();
+        let _ = alarm.schedule(SCAN_TIME_US);
+        alarm.enable_interrupt();
 
+        (Shared { timer, alarm, pin0 }, Local {}, init::Monotonics())
+    }
 
-    // Delay object
-    //let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    #[task(
+        binds = TIMER_IRQ_0,
+        priority = 1,
+        shared = [timer, alarm, pin0],
+        local = [tog: bool = true],
+    )]
+    fn timer_irq(mut c: timer_irq::Context) {
+        if *c.local.tog {
+            c.shared.pin0.lock(|l| l.set_high().unwrap());
+        } else {
+            c.shared.pin0.lock(|l| l.set_low().unwrap());
+        }
+        *c.local.tog = !*c.local.tog;
 
-    // The single-cycle I/O block controls our GPIO pins
-    let sio = hal::Sio::new(pac.SIO);
-
-    // Set the pins up according to their function on this particular board
-    let pins = rp_pico::Pins::new(
-        pac.IO_BANK0,
-        pac.PADS_BANK0,
-        sio.gpio_bank0,
-        &mut pac.RESETS,
-    );
-
-    // ----------- VALVE CONTROLLER SETUP ------------
-    // Create the valve controllers and initialize them.
-    // Need to check logic polarity
-    // Might chain init()...
-    let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output());
-    main_chamber_valve.init();
-    let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());
-    bladder_valve.init();
-
-    // ----------- THERMOCOUPLE CONTROLER SETUP ------------
-    // Chip select pins
-    let cs_ctr = pins.gpio17.into_push_pull_output();
-    let cs_lr = pins.gpio19.into_push_pull_output();
-    let cs_fb = pins.gpio20.into_push_pull_output();
-
-    // Set up SPI CLK and DataIn Lines.  These are implicitly used by the spi driver if they are in the correct mode
-    let _spi_sclk = pins.gpio18.into_mode::<gpio::FunctionSpi>();
-    let _spi_mosi = pins.gpio3.into_mode::<gpio::FunctionSpi>();
-    let _spi_miso = pins.gpio16.into_mode::<gpio::FunctionSpi>();
-
-    // Set up spi
-    let spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
-
-    let mut tc_controller = ThermocoupleController::new(cs_ctr, cs_lr, cs_fb, spi);
-    tc_controller.init();
-
-    // --------------- PRESSURE SENSOR CONTROLLER -----------
-    // Configure the auxiliary pins
-    let ad_start_pin = pins.gpio6.into_push_pull_output();      // Active low??
-    let ad_busy_pin = pins.gpio7.into_floating_input();        // AD Alert/Busy pin
-
-    // Configure sda & scl pins for I2C
-    let sda_pin = pins.gpio4.into_mode::<gpio::FunctionI2C>();
-    let scl_pin = pins.gpio5.into_mode::<gpio::FunctionI2C>();
-
-    // Configure the I2C0 device
-    let i2c = rp2040_hal::I2C::i2c0(
-        pac.I2C0,
-        sda_pin,
-        scl_pin,
-        400.kHz(),
-        &mut pac.RESETS,
-        &clocks.peripheral_clock,
-    );
-
-    // Create new PressureSensorController
-    let mut pressure_sensor_controller = PressureSensorController::new(ad_start_pin, ad_busy_pin, i2c);
-    pressure_sensor_controller.init();
-
-    let mut temps = tc_controller.read_temps(TCChannel::Center);
-    // Main loop forever
-    loop {
-        temps = tc_controller.read_temps(TCChannel::Center);
-        info!("Channel: {:?} \t\tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
-        temps = tc_controller.read_temps(TCChannel::LeftRight);
-        info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
-        temps = tc_controller.read_temps(TCChannel::FrontBack);
-        info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
-
-        let measurement = pressure_sensor_controller.read_pressures();
-        info!("PRESSURE----Channel: {:?} \tPressure: {=f32}", measurement.channel_index, measurement.pressure_pa);
-
-        println!("------");
-        delay.delay_ms(1000);
-
+        let mut alarm = c.shared.alarm;
+        (alarm).lock(|a| {
+            a.clear_interrupt();
+            let _ = a.schedule(SCAN_TIME_US);
+        });
     }
 }
-
-
-// End of file
