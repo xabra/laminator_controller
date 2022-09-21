@@ -7,7 +7,7 @@ use rp_pico::hal::gpio::{Pin, PinId, FunctionPwm, Pwm,Disabled, PullDown};
 pub struct HeaterController<'a, S: SliceId, C: ChannelId, I: PinId> {
     pwm_slice: &'a mut Slice<S, FreeRunning>,
     pwm_channel: Channel<S, FreeRunning, C>,
-    //pwm_pin: Pin<I, Disabled<PullDown>>,    // <===== IS THIS THE RIGHT PINMODE 'M' FOR PWM HERE? 
+    //pwm_pin: Pin<I, Disabled<PullDown>>,    // <===== IS THIS THE RIGHT PINMODE 'M' FOR PWM HERE?     
     pwm_pin: Pin<I, FunctionPwm>,    // <===== IS THIS THE RIGHT PINMODE 'M' FOR PWM HERE? 
 }
 
