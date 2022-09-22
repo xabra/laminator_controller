@@ -2,26 +2,29 @@
 #![no_main]
 
 use panic_halt as _;
-
 use defmt_rtt as _;
+
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app {
 
     use embedded_hal::digital::v2::OutputPin;
     use fugit::MicrosDurationU32;
+    use defmt::*;
     use rp_pico::{
         hal::{self, clocks::init_clocks_and_plls, timer::Alarm, watchdog::Watchdog, Sio},
         XOSC_CRYSTAL_FREQ,
     };
 
-    const SCAN_TIME_US: MicrosDurationU32 = MicrosDurationU32::secs(1);
+    const PWM_PERIOD_US: MicrosDurationU32 = MicrosDurationU32::millis(2000);
 
     #[shared]
     struct Shared {
         timer: hal::Timer,
-        alarm: hal::timer::Alarm0,
+        pwm_period_alarm: hal::timer::Alarm0,
+        pwm1_alarm:hal::timer::Alarm1,
         pin0: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio0, hal::gpio::PushPullOutput>,
+        pwm1_pulse_width: MicrosDurationU32,     // microseconds
     }
 
     #[local]
@@ -55,35 +58,74 @@ mod app {
             sio.gpio_bank0,
             &mut resets,
         );
+        // Setup pins
         let mut pin0 = pins.gpio0.into_push_pull_output();
         pin0.set_low().unwrap();
 
-        let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
-        let mut alarm = timer.alarm_0().unwrap();
-        let _ = alarm.schedule(SCAN_TIME_US);
-        alarm.enable_interrupt();
+        // Init the pwm pulse width
+        let pwm1_pulse_width = MicrosDurationU32::millis(500);
 
-        (Shared { timer, alarm, pin0 }, Local {}, init::Monotonics())
+        let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
+
+        let mut pwm_period_alarm = timer.alarm_0().unwrap();
+        let mut pwm1_alarm = timer.alarm_1().unwrap();
+
+        let _ = pwm_period_alarm.schedule(PWM_PERIOD_US);
+        let _ = pwm1_alarm.schedule(pwm1_pulse_width);
+
+        pwm_period_alarm.enable_interrupt();
+        pwm1_alarm.enable_interrupt();
+
+        info!("RTIC Init Complete");
+
+        (Shared { timer, pwm_period_alarm, pwm1_alarm, pwm1_pulse_width, pin0}, Local {}, init::Monotonics())
     }
 
     #[task(
         binds = TIMER_IRQ_0,
-        priority = 1,
-        shared = [timer, alarm, pin0],
-        local = [tog: bool = true],
+        priority = 2,
+        shared = [timer, pwm_period_alarm, pwm1_alarm, pwm1_pulse_width, pin0],
     )]
-    fn timer_irq(mut c: timer_irq::Context) {
-        if *c.local.tog {
-            c.shared.pin0.lock(|l| l.set_high().unwrap());
-        } else {
-            c.shared.pin0.lock(|l| l.set_low().unwrap());
-        }
-        *c.local.tog = !*c.local.tog;
+    fn pwm_period_timer_irq(mut c: pwm_period_timer_irq::Context) { 
 
-        let mut alarm = c.shared.alarm;
-        (alarm).lock(|a| {
+        // Get both alarm objects
+        let mut pwm_period_alarm = c.shared.pwm_period_alarm;
+        let pwm1_alarm = c.shared.pwm1_alarm;
+        let pw = c.shared.pwm1_pulse_width;
+
+        // Retrigger the period alarm
+        (pwm_period_alarm).lock(|a| {
             a.clear_interrupt();
-            let _ = a.schedule(SCAN_TIME_US);
+            let _ = a.schedule(PWM_PERIOD_US);
         });
+
+        // Retrigger pwm1 pulsewidth alarm
+        (pwm1_alarm, pw).lock(|a, pw| {
+            a.clear_interrupt();
+            let _ = a.schedule(*pw);
+        });
+
+        // Set pwm1 pin high
+        c.shared.pin0.lock(|l| l.set_high().unwrap());     
+        
+    }
+
+    #[task(
+        binds = TIMER_IRQ_1,
+        priority = 1,
+        shared = [timer, pwm1_alarm, pin0],
+    )]
+    fn pwm1_pulse_timer_irq(mut c: pwm1_pulse_timer_irq::Context) {
+
+        let mut pwm1_alarm = c.shared.pwm1_alarm;
+
+        // Clear the interrupt
+        (pwm1_alarm).lock(|a| {
+            a.clear_interrupt();
+        });
+
+        // Set pwm1 pin low
+        c.shared.pin0.lock(|l| l.set_low().unwrap());
+        
     }
 }
