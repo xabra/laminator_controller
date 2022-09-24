@@ -304,6 +304,7 @@ dependencies = [
  "panic-halt",
  "rp-pico",
  "rp2040-hal",
+ "rp2040-monotonic",
 ]
 
 [[package]]
@@ -529,6 +530,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "rp2040-monotonic"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b7b4e72b913ad6c28bf3239d18c26fd2adc83b01dfd4ca1d3cf73d298d19c1a"
+dependencies = [
+ "fugit",
+ "rp2040-pac",
+ "rtic-monotonic",
 ]
 
 [[package]]

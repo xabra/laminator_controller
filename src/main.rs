@@ -4,27 +4,29 @@
 use panic_halt as _;
 use defmt_rtt as _;
 
-
-#[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
+#[rtic::app(device = rp_pico::hal::pac, peripherals = true, dispatchers = [ADC_IRQ_FIFO, UART1_IRQ, DMA_IRQ_1])]    // Unused IRQs in the dispatch list
 mod app {
 
     use embedded_hal::digital::v2::OutputPin;
-    use fugit::MicrosDurationU32;
+    use rp2040_monotonic::*;
+    use fugit::{MicrosDurationU64};
     use defmt::*;
     use rp_pico::{
-        hal::{self, clocks::init_clocks_and_plls, timer::Alarm, watchdog::Watchdog, Sio},
+        hal::{self, clocks::init_clocks_and_plls, watchdog::Watchdog, Sio},
         XOSC_CRYSTAL_FREQ,
     };
 
-    const PWM_PERIOD_US: MicrosDurationU32 = MicrosDurationU32::millis(2000);
+    // PWM timebase
+    const PWM_PERIOD: MicrosDurationU64  = MicrosDurationU64::millis(2000);
+
+    #[monotonic(binds = TIMER_IRQ_0, default = true)]
+    type MyMono = Rp2040Monotonic;
 
     #[shared]
     struct Shared {
-        timer: hal::Timer,
-        pwm_period_alarm: hal::timer::Alarm0,
-        pwm1_alarm:hal::timer::Alarm1,
-        pin0: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio0, hal::gpio::PushPullOutput>,
-        pwm1_pulse_width: MicrosDurationU32,     // microseconds
+        master_cycle_trigger_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio8, hal::gpio::PushPullOutput>,  // Debug only.
+        htr_ctr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio15, hal::gpio::PushPullOutput>,
+        htr_ctr_pulse_width: MicrosDurationU64,
     }
 
     #[local]
@@ -58,74 +60,57 @@ mod app {
             sio.gpio_bank0,
             &mut resets,
         );
-        // Setup pins
-        let mut pin0 = pins.gpio0.into_push_pull_output();
-        pin0.set_low().unwrap();
+        // Create new monotonic
+        let mono = Rp2040Monotonic::new(c.device.TIMER);
 
+
+        // Heater PWMs setup
+        let mut htr_ctr_pin = pins.gpio15.into_push_pull_output();
+        htr_ctr_pin.set_low().unwrap();
+  
         // Init the pwm pulse width
-        let pwm1_pulse_width = MicrosDurationU32::millis(500);
+        let htr_ctr_pulse_width = MicrosDurationU64::millis(0);
 
-        let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
+        let mut master_cycle_trigger_pin = pins.gpio8.into_push_pull_output();
+        master_cycle_trigger_pin.set_low().unwrap();
 
-        let mut pwm_period_alarm = timer.alarm_0().unwrap();
-        let mut pwm1_alarm = timer.alarm_1().unwrap();
+        pwm_period_timer::spawn().unwrap();
+        sample_timer::spawn().unwrap();
 
-        let _ = pwm_period_alarm.schedule(PWM_PERIOD_US);
-        let _ = pwm1_alarm.schedule(pwm1_pulse_width);
-
-        pwm_period_alarm.enable_interrupt();
-        pwm1_alarm.enable_interrupt();
-
-        info!("RTIC Init Complete");
-
-        (Shared { timer, pwm_period_alarm, pwm1_alarm, pwm1_pulse_width, pin0}, Local {}, init::Monotonics())
+        (Shared { htr_ctr_pulse_width, htr_ctr_pin, master_cycle_trigger_pin}, Local {}, init::Monotonics(mono))
     }
 
-    #[task(
-        binds = TIMER_IRQ_0,
-        priority = 2,
-        shared = [timer, pwm_period_alarm, pwm1_alarm, pwm1_pulse_width, pin0],
-    )]
-    fn pwm_period_timer_irq(mut c: pwm_period_timer_irq::Context) { 
+    // -- TASK: High speed measurement & processing cycle start
+    #[task(priority = 3, shared = [master_cycle_trigger_pin])]
+    fn sample_timer(mut c: sample_timer::Context) { 
 
-        // Get both alarm objects
-        let mut pwm_period_alarm = c.shared.pwm_period_alarm;
-        let pwm1_alarm = c.shared.pwm1_alarm;
-        let pw = c.shared.pwm1_pulse_width;
-
-        // Retrigger the period alarm
-        (pwm_period_alarm).lock(|a| {
-            a.clear_interrupt();
-            let _ = a.schedule(PWM_PERIOD_US);
-        });
-
-        // Retrigger pwm1 pulsewidth alarm
-        (pwm1_alarm, pw).lock(|a, pw| {
-            a.clear_interrupt();
-            let _ = a.schedule(*pw);
-        });
-
-        // Set pwm1 pin high
-        c.shared.pin0.lock(|l| l.set_high().unwrap());     
-        
+        c.shared.master_cycle_trigger_pin.lock(|l| l.set_high().unwrap()); 
+        sample_timer::spawn_after(1.millis()).unwrap();
+        c.shared.master_cycle_trigger_pin.lock(|l| l.set_low().unwrap()); 
     }
 
-    #[task(
-        binds = TIMER_IRQ_1,
-        priority = 1,
-        shared = [timer, pwm1_alarm, pin0],
-    )]
-    fn pwm1_pulse_timer_irq(mut c: pwm1_pulse_timer_irq::Context) {
+    // -- TASK: Low speed PWM period timebase
+    #[task(priority = 1, shared = [htr_ctr_pulse_width, htr_ctr_pin])]
+    fn pwm_period_timer(mut c: pwm_period_timer::Context) { 
 
-        let mut pwm1_alarm = c.shared.pwm1_alarm;
-
-        // Clear the interrupt
-        (pwm1_alarm).lock(|a| {
-            a.clear_interrupt();
-        });
-
-        // Set pwm1 pin low
-        c.shared.pin0.lock(|l| l.set_low().unwrap());
+        // Schedule a restart of this task first 
+        pwm_period_timer::spawn_after(PWM_PERIOD).unwrap();
         
+        // Get convenient pwm output pin and pulse width variables
+        let ctr  = c.shared.htr_ctr_pin;
+        let pw = c.shared.htr_ctr_pulse_width;
+
+        // Lock the shared values and do critical stuff in closure.
+        // Set pins high to start duty factor pulse and schedule a task to end the duty-factor pulse
+        (ctr, pw).lock(|ctr, pw| 
+            {ctr.set_high().unwrap();
+            pwm1_set_low::spawn_after(*pw).unwrap();}
+        ); 
+    }
+
+    // -- TASK: End the PWM duty-factor pulse
+    #[task(priority = 1, shared = [htr_ctr_pin])]
+    fn pwm1_set_low(mut c: pwm1_set_low::Context) {
+        c.shared.htr_ctr_pin.lock(|l| l.set_low().unwrap());
     }
 }
