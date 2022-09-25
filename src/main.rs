@@ -1,5 +1,5 @@
 #![no_std]
-#![no_main]
+#![no_main]   //s
 
 use panic_halt as _;
 use defmt_rtt as _;
