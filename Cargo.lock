@@ -513,6 +513,7 @@ dependencies = [
  "rand_core",
  "rp2040-hal-macros",
  "rp2040-pac",
+ "rtic-monotonic",
  "usb-device",
  "vcell",
  "void",

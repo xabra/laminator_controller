@@ -2,7 +2,7 @@
 #![no_main]
 
 use panic_halt as _;
-
+use defmt_rtt as _;
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true, dispatchers = [I2C0_IRQ])]
 mod app {
 
