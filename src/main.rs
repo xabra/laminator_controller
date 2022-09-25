@@ -69,7 +69,7 @@ mod app {
         htr_ctr_pin.set_low().unwrap();
   
         // Init the pwm pulse width
-        let htr_ctr_pulse_width = MicrosDurationU64::millis(0);
+        let htr_ctr_pulse_width = MicrosDurationU64::millis(200);
 
         let mut master_cycle_trigger_pin = pins.gpio8.into_push_pull_output();
         master_cycle_trigger_pin.set_low().unwrap();
