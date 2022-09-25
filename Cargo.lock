@@ -304,8 +304,7 @@ dependencies = [
  "panic-halt",
  "rp-pico",
  "rp2040-hal",
- "rp2040-monotonic",
- "systick-monotonic",
+ "rtic-monotonic",
 ]
 
 [[package]]
@@ -477,8 +476,7 @@ dependencies = [
 [[package]]
 name = "rp-pico"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15eec35d047d5ac3f9bc12686687e404f587acce23f76b6af04c0e0ce270a0b5"
+source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#5aa7ee7923a3fe28d6b64a3d83a74eb9c6ae28c8"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -500,8 +498,7 @@ dependencies = [
 [[package]]
 name = "rp2040-hal"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f919d0d3c64fd9c7642dac2267a55d6aa1667e45329e8605a3858727acc7711"
+source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#5aa7ee7923a3fe28d6b64a3d83a74eb9c6ae28c8"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -524,24 +521,11 @@ dependencies = [
 [[package]]
 name = "rp2040-hal-macros"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86479063e497efe1ae81995ef9071f54fd1c7427e04d6c5b84cde545ff672a5e"
+source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#5aa7ee7923a3fe28d6b64a3d83a74eb9c6ae28c8"
 dependencies = [
- "cortex-m-rt",
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "rp2040-monotonic"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b7b4e72b913ad6c28bf3239d18c26fd2adc83b01dfd4ca1d3cf73d298d19c1a"
-dependencies = [
- "fugit",
- "rp2040-pac",
- "rtic-monotonic",
 ]
 
 [[package]]
@@ -648,17 +632,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "systick-monotonic"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57e71d8e4587d8f434b88b9aef901987f46164df813a3a1d6bdf3a58debf67f0"
-dependencies = [
- "cortex-m",
- "fugit",
- "rtic-monotonic",
 ]
 
 [[package]]
