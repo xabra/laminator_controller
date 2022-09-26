@@ -4,7 +4,8 @@
 use panic_halt as _;
 use defmt_rtt as _;
 
-#[rtic::app(device = rp_pico::hal::pac, peripherals = true, dispatchers = [ADC_IRQ_FIFO, UART1_IRQ, DMA_IRQ_1])]    // Unused IRQs in the dispatch list
+// Place unused IRQs in the dispatchers list.  You need one for each priority level in your code
+#[rtic::app(device = rp_pico::hal::pac, peripherals = true, dispatchers = [ADC_IRQ_FIFO, UART1_IRQ, DMA_IRQ_1])]    
 mod app {
 
     use embedded_hal::digital::v2::OutputPin;
@@ -15,20 +16,20 @@ mod app {
         XOSC_CRYSTAL_FREQ,
     };
 
-    // PWM timebase
-    const PWM_PERIOD: MicrosDurationU64  = MicrosDurationU64::millis(2000);
-    const SCAN_TIME_US: MicrosDurationU32 = MicrosDurationU32::secs(1);
 
+    // PWM cycle period. Hardware tasks are scheduled using a u32 representing at time in microseconds.
+    const PWM_PERIOD_US: MicrosDurationU32 = MicrosDurationU32::millis(1000);
+
+    const DUTY_PERIOD: MicrosDurationU64  = MicrosDurationU64::millis(200);
+
+    // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
     type MyMono = Monotonic<Alarm0>;
 
     #[shared]
     struct Shared {
-        //timer: hal::Timer,
         alarm1: hal::timer::Alarm1,     // HW IRQ 
-        //alarm2: hal::timer::Alarm2,   // Unused for now
-        //alarm3: hal::timer::Alarm3,   // Unused for now
-        measure_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio8, hal::gpio::PushPullOutput>,
+        measure_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio15, hal::gpio::PushPullOutput>,
     }
 
     #[local]
@@ -36,6 +37,7 @@ mod app {
 
     #[init]
     fn init(c: init::Context) -> (Shared, Local, init::Monotonics) {
+        // --- Init boilerplate ---
         // Soft-reset does not release the hardware spinlocks
         // Release them now to avoid a deadlock after debug or watchdog reset
         unsafe {
@@ -62,42 +64,64 @@ mod app {
             sio.gpio_bank0,
             &mut resets,
         );
-        // Create new timer and alarm
-        let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
-        let alarm0 = timer.alarm_0().unwrap();          // Alarm0 reserved for monotonic/ SW tasks
-        let mut alarm1 = timer.alarm_1().unwrap();      // Use for HW IRQ Task
-        //let mut _alarm2 = timer.alarm_2().unwrap();      // Unused for now
-        //let mut _alarm3 = timer.alarm_3().unwrap();      // Unused for now
+        // --- End of init boilerplate ---
 
-        let mut measure_pin = pins.gpio8.into_push_pull_output();
+        // Create new timer.  Provides four alarm interrupts (0-3)
+        let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
+
+        // Create alarm0 dedicated to rtic monotonic.
+        // Any number of RTIC scheduled software tasks will be handled by monotonic 
+        let alarm0 = timer.alarm_0().unwrap();     
+
+        // Create alarm1. When alarm1 triggers, it generates interrupt TIMER_IRQ_1
+        // This interrupt will be bound to a hardware task that services the interrupt.
+        let mut alarm1 = timer.alarm_1().unwrap();      
+
+        // Create a pin to observe output.  Could be any gpio or the led
+        let mut measure_pin = pins.gpio15.into_push_pull_output();
         measure_pin.set_low().unwrap();
 
-        // Fast measurement HW interrupt
-        let _ = alarm1.schedule(SCAN_TIME_US);
+        // Schedule the first HW interrupt task.
+        let _ = alarm1.schedule(PWM_PERIOD_US);
         alarm1.enable_interrupt();
 
+        info!("Finished INIT");
+        // Init and return the Shared data structure
         (Shared { alarm1, measure_pin}, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
     }
 
-    // -- TASK: High speed measurement & processing cycle start
+    // -- TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.  It starts the PWM cycle by:
+    //     - Set the output pin high
+    //     - Clear the interrupt for this task
+    //     - Schedule a the next interation of the PWM cycle (this task) based on PWM period
+    //     - Schedule the pin to be set low after a time corresponding to the PWM pulse width
     #[task(
-        priority = 1, 
-        binds = TIMER_IRQ_1,
-        local = [tog: bool = true], 
+        priority = 2, 
+        binds = TIMER_IRQ_1,  
         shared = [measure_pin, alarm1])]
-    fn sample_timer(mut c: sample_timer::Context) { 
-        if *c.local.tog {
-            c.shared.measure_pin.lock(|l| l.set_high().unwrap());
-        } else {
-            c.shared.measure_pin.lock(|l| l.set_low().unwrap());
-        }
-        *c.local.tog = !*c.local.tog;
+    fn pwm_period_task (c: pwm_period_task::Context) { 
+        let pin = c.shared.measure_pin;
+        let alarm = c.shared.alarm1;
+        info!("In task 1");
+        
 
-        let mut alarm = c.shared.alarm1;
-        (alarm).lock(|a| {
+        (alarm, pin).lock(|a, p| {
             a.clear_interrupt();
-            let _ = a.schedule(SCAN_TIME_US);
+            p.set_high().unwrap();
+            let _ = a.schedule(PWM_PERIOD_US);
         });
+        end_pulse_task::spawn_after(DUTY_PERIOD).unwrap();
+    }
 
+    // -- TASK: Software task to set the pin low at end of duty cycle
+    #[task(
+        priority = 1,   
+        shared = [measure_pin])]
+    fn end_pulse_task(c: end_pulse_task::Context) { 
+        let mut pin = c.shared.measure_pin;
+        info!("In task 2");
+        (pin).lock(|p| {
+            p.set_low().unwrap();
+        });
     }
 }
