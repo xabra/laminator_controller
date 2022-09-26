@@ -24,7 +24,7 @@ mod app {
 
     #[shared]
     struct Shared {
-        timer: hal::Timer,
+        //timer: hal::Timer,
         alarm1: hal::timer::Alarm1,     // HW IRQ 
         //alarm2: hal::timer::Alarm2,   // Unused for now
         //alarm3: hal::timer::Alarm3,   // Unused for now
@@ -66,8 +66,8 @@ mod app {
         let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
         let alarm0 = timer.alarm_0().unwrap();          // Alarm0 reserved for monotonic/ SW tasks
         let mut alarm1 = timer.alarm_1().unwrap();      // Use for HW IRQ Task
-        let mut _alarm2 = timer.alarm_2().unwrap();      // Unused for now
-        let mut _alarm3 = timer.alarm_3().unwrap();      // Unused for now
+        //let mut _alarm2 = timer.alarm_2().unwrap();      // Unused for now
+        //let mut _alarm3 = timer.alarm_3().unwrap();      // Unused for now
 
         let mut measure_pin = pins.gpio8.into_push_pull_output();
         measure_pin.set_low().unwrap();
@@ -76,7 +76,7 @@ mod app {
         let _ = alarm1.schedule(SCAN_TIME_US);
         alarm1.enable_interrupt();
 
-        (Shared { timer, alarm1, measure_pin}, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
+        (Shared { alarm1, measure_pin}, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
     }
 
     // -- TASK: High speed measurement & processing cycle start
