@@ -305,6 +305,7 @@ dependencies = [
  "rp-pico",
  "rp2040-hal",
  "rp2040-monotonic",
+ "rtic-monotonic",
  "systick-monotonic",
 ]
 
@@ -477,8 +478,7 @@ dependencies = [
 [[package]]
 name = "rp-pico"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15eec35d047d5ac3f9bc12686687e404f587acce23f76b6af04c0e0ce270a0b5"
+source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#5aa7ee7923a3fe28d6b64a3d83a74eb9c6ae28c8"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -500,8 +500,7 @@ dependencies = [
 [[package]]
 name = "rp2040-hal"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f919d0d3c64fd9c7642dac2267a55d6aa1667e45329e8605a3858727acc7711"
+source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#5aa7ee7923a3fe28d6b64a3d83a74eb9c6ae28c8"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -516,6 +515,7 @@ dependencies = [
  "rand_core",
  "rp2040-hal-macros",
  "rp2040-pac",
+ "rtic-monotonic",
  "usb-device",
  "vcell",
  "void",
@@ -524,10 +524,8 @@ dependencies = [
 [[package]]
 name = "rp2040-hal-macros"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86479063e497efe1ae81995ef9071f54fd1c7427e04d6c5b84cde545ff672a5e"
+source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#5aa7ee7923a3fe28d6b64a3d83a74eb9c6ae28c8"
 dependencies = [
- "cortex-m-rt",
  "proc-macro2",
  "quote",
  "syn",
