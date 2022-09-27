@@ -102,7 +102,7 @@ mod app {
 
         //  Set the duty factor (actually the time) to output is high
         // Unlike hardware tasks, software tasks accept any u64 backed duration.
-        let duty_period = MicrosDurationU64::millis(1);
+        let duty_period = MicrosDurationU64::millis(25);
 
         // Schedule the first HW interrupt task.
         let _ = alarm1.schedule(PWM_PERIOD_US);
