@@ -5,23 +5,7 @@ use panic_halt as _;
 use defmt_rtt as _;
 
 /*
-This is an RTIC example for the Raspberry Pi Pico or other RP2040 based boards.
-It shows the simultaneous use of hardware interrupt-based tasks 
-and scheduled software tasks.  It implements a simple pulse-width modulation (PWM)
-output on a gpio pin.  The hardware task is triggered by Alarm1/TIMER_IRQ_1.  It controls
-the overall period of the PWM.  The width of the pulse is controlled by the software task which
-is spawned at the start of each PWM period by the hardware task.
-
-Scheduled software tasks in RTIC - those that are scheduled to be spawned at some point in the future -
-require their own monotonic timebase which in this case is bound to Alarm0/TIMER_IRQ_0.
-
-Thus, is it possible to have up to three precision hardware timer-based interrupts and unlimited
-scheduled software tasks using the pico/rp2040 timer peripheral.
-
-In this example, the PWM period is a const.  The duty factor (period) is a shared variable which
-could be driven from another section of code.
-
-! Note that no checking is done to insure that duty period < PWM_PERIOD.
+This is 
 */
 
 // Place unused IRQs in the dispatchers list.  You need one IRQ for each priority level in your code
@@ -29,7 +13,7 @@ could be driven from another section of code.
 mod app {
 
     use embedded_hal::digital::v2::OutputPin;
-    use fugit::{MicrosDurationU32, MicrosDurationU64};
+    use fugit::{Duration, MicrosDurationU32, MicrosDurationU64};
     use defmt::*;
     use rp_pico::{
         hal::{self, clocks::init_clocks_and_plls, timer::{monotonic::Monotonic, Alarm, Alarm0}, watchdog::Watchdog, Sio},
@@ -48,7 +32,8 @@ mod app {
     struct Shared {
         alarm1: hal::timer::Alarm1,     // HW IRQ 
         output_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio15, hal::gpio::PushPullOutput>,
-        duty_period: MicrosDurationU64, // Time duration that output pin is high
+        pwm1: Pwm,
+        //duty_period: MicrosDurationU64, // Time duration that output pin is high
     }
 
     #[local]
@@ -100,16 +85,17 @@ mod app {
         let mut output_pin = pins.gpio15.into_push_pull_output();
         output_pin.set_low().unwrap();
 
-        //  Set the duty factor (actually the time) to output is high
-        // Unlike hardware tasks, software tasks accept any u64 backed duration.
-        let duty_period = MicrosDurationU64::millis(25);
+        // Create a pwm, set its duty factor and enable it.
+        let mut pwm1 = Pwm::new(PWM_PERIOD_US);
+        pwm1.set_duty_factor(0.30).unwrap();
+        pwm1.set_enabled(true);
 
         // Schedule the first HW interrupt task.
         let _ = alarm1.schedule(PWM_PERIOD_US);
         alarm1.enable_interrupt();
 
         // Init and return the Shared data structure
-        (Shared { alarm1, output_pin, duty_period}, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
+        (Shared { alarm1, output_pin, pwm1}, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
     }
 
     // -- TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.  It starts the PWM cycle by:
@@ -120,16 +106,16 @@ mod app {
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_1,  
-        shared = [output_pin, alarm1, duty_period])]
+        shared = [output_pin, alarm1, pwm1])]
     fn pwm_period_task (c: pwm_period_task::Context) { 
         let pin = c.shared.output_pin;
         let alarm = c.shared.alarm1;
-        let dp = c.shared.duty_period;
-        (alarm, pin, dp).lock(|a, p, dp| {
+        let pwm = c.shared.pwm1;
+        (alarm, pin, pwm).lock(|a, p, pwm| {
             a.clear_interrupt();
             p.set_high().unwrap();
             let _ = a.schedule(PWM_PERIOD_US);
-            end_pulse_task::spawn_after(*dp).unwrap();
+            end_pulse_task::spawn_after(pwm.get_pulse_width()).unwrap();
         });
         
     }
@@ -145,5 +131,37 @@ mod app {
         });
     }
 
+    pub struct Pwm {
+        period: Duration<u32,1,1_000_000>,
+        duty_factor: f32,
+        enabled: bool,
+    }
+
+    impl Pwm {
+        pub fn new(period:Duration<u32,1,1_000_000>) -> Pwm {
+            Pwm {
+                period,
+                duty_factor: 0.0,
+                enabled: false,
+            }
+        }
+
+        pub fn set_duty_factor (&mut self, duty_factor: f32) -> Result<(), ()> {
+            if (duty_factor < 0.0) || (duty_factor > 1.0) {
+                return Err(())
+            }
+            self.duty_factor = duty_factor;
+            Ok(())
+        }       
+
+        pub fn set_enabled (&mut self, en: bool) {
+            self.enabled = en;
+        }
+
+        pub fn get_pulse_width (&self) -> MicrosDurationU64{
+            let pulse_width_microsec = ((self.period.to_micros() as f32)*self.duty_factor) as u64;
+            MicrosDurationU64::micros(pulse_width_microsec)
+        }
+    }
 
 }
