@@ -203,7 +203,7 @@ mod app {
 
         pub fn get_pulse_width (&self) -> MicrosDurationU64{
             let pulse_width_microsec = (((self.period.to_micros() as u32)*(self.duty_factor as u32))/255_u32) as u64;
-            info!("get pulse width: {:?}", pulse_width_microsec);
+            //info!("get pulse width: {:?}", pulse_width_microsec);
             MicrosDurationU64::micros(pulse_width_microsec)
         }
     }
