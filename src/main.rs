@@ -87,21 +87,21 @@ mod app {
 
         // Create a CENTER PWM, set its duty factor and enable it.
         let mut htr_ctr_pwm = Pwm::new(PWM_PERIOD_US);
-        htr_ctr_pwm.set_duty_factor(0.30).unwrap();
+        htr_ctr_pwm.set_duty_factor(127);
         let mut htr_ctr_pin = pins.gpio15.into_push_pull_output();
         htr_ctr_pin.set_low().unwrap();
         htr_ctr_pwm.set_enabled(true);
 
         // Create a LR PWM, set its duty factor and enable it.
         let mut htr_lr_pwm = Pwm::new(PWM_PERIOD_US);
-        htr_lr_pwm.set_duty_factor(0.001).unwrap();
+        htr_lr_pwm.set_duty_factor(1);
         let mut htr_lr_pin = pins.gpio13.into_push_pull_output();
         htr_lr_pin.set_low().unwrap();
         htr_lr_pwm.set_enabled(true);
 
         // Create a FB PWM, set its duty factor and enable it.
         let mut htr_fb_pwm = Pwm::new(PWM_PERIOD_US);
-        htr_fb_pwm.set_duty_factor(0.999).unwrap();
+        htr_fb_pwm.set_duty_factor(254);
         let mut htr_fb_pin = pins.gpio14.into_push_pull_output();
         htr_fb_pin.set_low().unwrap();
         htr_fb_pwm.set_enabled(true);
@@ -179,7 +179,7 @@ mod app {
     }
     pub struct Pwm {
         period: Duration<u32,1,1_000_000>,
-        duty_factor: f32,
+        duty_factor: u8,
         enabled: bool,
     }
 
@@ -187,17 +187,14 @@ mod app {
         pub fn new(period:Duration<u32,1,1_000_000>) -> Pwm {
             Pwm {
                 period,
-                duty_factor: 0.0,
+                duty_factor: 0,
                 enabled: false,
             }
         }
 
-        pub fn set_duty_factor (&mut self, duty_factor: f32) -> Result<(), ()> {
-            if (duty_factor < 0.0) || (duty_factor > 1.0) {
-                return Err(())
-            }
+        pub fn set_duty_factor (&mut self, duty_factor: u8){
+
             self.duty_factor = duty_factor;
-            Ok(())
         }       
 
         pub fn set_enabled (&mut self, en: bool) {
@@ -205,7 +202,8 @@ mod app {
         }
 
         pub fn get_pulse_width (&self) -> MicrosDurationU64{
-            let pulse_width_microsec = ((self.period.to_micros() as f32)*self.duty_factor) as u64;
+            let pulse_width_microsec = (((self.period.to_micros() as u32)*(self.duty_factor as u32))/255_u32) as u64;
+            info!("get pulse width: {:?}", pulse_width_microsec);
             MicrosDurationU64::micros(pulse_width_microsec)
         }
     }
