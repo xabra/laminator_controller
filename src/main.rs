@@ -30,10 +30,14 @@ mod app {
 
     #[shared]
     struct Shared {
+        // Heater PWM stuff
         alarm1: hal::timer::Alarm1,     // HW IRQ 
-        output_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio15, hal::gpio::PushPullOutput>,
-        pwm1: Pwm,
-        //duty_period: MicrosDurationU64, // Time duration that output pin is high
+        htr_ctr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio15, hal::gpio::PushPullOutput>,
+        htr_ctr_pwm: Pwm,
+        htr_lr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio13, hal::gpio::PushPullOutput>,
+        htr_lr_pwm: Pwm,
+        htr_fb_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio14, hal::gpio::PushPullOutput>,
+        htr_fb_pwm: Pwm,
     }
 
     #[local]
@@ -81,21 +85,33 @@ mod app {
         // This interrupt will be bound to a hardware task that services the interrupt.
         let mut alarm1 = timer.alarm_1().unwrap();      
 
-        // Create a pin to observe output.  Could be any gpio or the led
-        let mut output_pin = pins.gpio15.into_push_pull_output();
-        output_pin.set_low().unwrap();
+        // Create a CENTER PWM, set its duty factor and enable it.
+        let mut htr_ctr_pwm = Pwm::new(PWM_PERIOD_US);
+        htr_ctr_pwm.set_duty_factor(0.30).unwrap();
+        let mut htr_ctr_pin = pins.gpio15.into_push_pull_output();
+        htr_ctr_pin.set_low().unwrap();
+        htr_ctr_pwm.set_enabled(true);
 
-        // Create a pwm, set its duty factor and enable it.
-        let mut pwm1 = Pwm::new(PWM_PERIOD_US);
-        pwm1.set_duty_factor(0.30).unwrap();
-        pwm1.set_enabled(true);
+        // Create a LR PWM, set its duty factor and enable it.
+        let mut htr_lr_pwm = Pwm::new(PWM_PERIOD_US);
+        htr_lr_pwm.set_duty_factor(0.001).unwrap();
+        let mut htr_lr_pin = pins.gpio13.into_push_pull_output();
+        htr_lr_pin.set_low().unwrap();
+        htr_lr_pwm.set_enabled(true);
+
+        // Create a FB PWM, set its duty factor and enable it.
+        let mut htr_fb_pwm = Pwm::new(PWM_PERIOD_US);
+        htr_fb_pwm.set_duty_factor(0.999).unwrap();
+        let mut htr_fb_pin = pins.gpio14.into_push_pull_output();
+        htr_fb_pin.set_low().unwrap();
+        htr_fb_pwm.set_enabled(true);
 
         // Schedule the first HW interrupt task.
         let _ = alarm1.schedule(PWM_PERIOD_US);
         alarm1.enable_interrupt();
 
         // Init and return the Shared data structure
-        (Shared { alarm1, output_pin, pwm1}, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
+        (Shared { alarm1, htr_ctr_pin, htr_ctr_pwm, htr_lr_pin, htr_lr_pwm, htr_fb_pin, htr_fb_pwm}, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
     }
 
     // -- TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.  It starts the PWM cycle by:
@@ -106,16 +122,25 @@ mod app {
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_1,  
-        shared = [output_pin, alarm1, pwm1])]
+        shared = [alarm1, htr_ctr_pin, htr_ctr_pwm, htr_lr_pin, htr_lr_pwm, htr_fb_pin, htr_fb_pwm])]
     fn pwm_period_task (c: pwm_period_task::Context) { 
-        let pin = c.shared.output_pin;
         let alarm = c.shared.alarm1;
-        let pwm = c.shared.pwm1;
-        (alarm, pin, pwm).lock(|a, p, pwm| {
+        let ctr_pin = c.shared.htr_ctr_pin;
+        let lr_pin = c.shared.htr_lr_pin;
+        let fb_pin = c.shared.htr_fb_pin;
+        
+        let ctr_pwm = c.shared.htr_ctr_pwm;
+        let lr_pwm = c.shared.htr_lr_pwm;
+        let fb_pwm = c.shared.htr_fb_pwm;
+        (alarm, ctr_pin, lr_pin, fb_pin, ctr_pwm, lr_pwm, fb_pwm).lock(|a, ctp, lrp, fbp, ctpwm, lrpwm, fbpwm| {
             a.clear_interrupt();
-            p.set_high().unwrap();
+            ctp.set_high().unwrap();
+            lrp.set_high().unwrap();
+            fbp.set_high().unwrap();
             let _ = a.schedule(PWM_PERIOD_US);
-            end_pulse_task::spawn_after(pwm.get_pulse_width()).unwrap();
+            end_ctr_pulse_task::spawn_after(ctpwm.get_pulse_width()).unwrap();
+            end_lr_pulse_task::spawn_after(lrpwm.get_pulse_width()).unwrap();
+            end_fb_pulse_task::spawn_after(fbpwm.get_pulse_width()).unwrap();
         });
         
     }
@@ -123,14 +148,35 @@ mod app {
     // -- TASK: Software task to set the pin low at end of duty cycle
     #[task(
         priority = 1,   
-        shared = [output_pin])]
-    fn end_pulse_task(c: end_pulse_task::Context) { 
-        let mut pin = c.shared.output_pin;
+        shared = [htr_ctr_pin])]
+    fn end_ctr_pulse_task(c: end_ctr_pulse_task::Context) { 
+        let mut pin = c.shared.htr_ctr_pin;
         (pin).lock(|p| {
             p.set_low().unwrap();
         });
     }
 
+    // -- TASK: Software task to set the pin low at end of duty cycle
+    #[task(
+        priority = 1,   
+        shared = [htr_lr_pin])]
+    fn end_lr_pulse_task(c: end_lr_pulse_task::Context) { 
+        let mut pin = c.shared.htr_lr_pin;
+        (pin).lock(|p| {
+            p.set_low().unwrap();
+        });
+    }
+
+    // -- TASK: Software task to set the pin low at end of duty cycle
+    #[task(
+        priority = 1,   
+        shared = [htr_fb_pin])]
+    fn end_fb_pulse_task(c: end_fb_pulse_task::Context) { 
+        let mut pin = c.shared.htr_fb_pin;
+        (pin).lock(|p| {
+            p.set_low().unwrap();
+        });
+    }
     pub struct Pwm {
         period: Duration<u32,1,1_000_000>,
         duty_factor: f32,
