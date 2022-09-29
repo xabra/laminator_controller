@@ -1,146 +1,187 @@
-//! # Laminator Controller
-//!
-//! Runs the custom laminator controller powered by the Pico W
-
 #![no_std]
 #![no_main]
 
-use panic_halt as _;    // panic fuctionality
-
-use rp_pico::entry;     // Entry point macro
-use rp_pico::hal::prelude::*;
-use rp_pico::hal::pac;
-use rp_pico::hal;
-use rp_pico::hal::gpio;
-// I2C HAL traits & Types.
-use rp_pico::hal::spi;
-use fugit::RateExtU32;
-
-// Logging stuff..
-use defmt::*;
+use panic_halt as _;
 use defmt_rtt as _;
 
+/*
+This is 
+*/
 
-// Valve Controller:
-pub mod valve_controller;
-//use valve_controller::ValveState;
-use valve_controller::ValveController;
+// Place unused IRQs in the dispatchers list.  You need one IRQ for each priority level in your code
+#[rtic::app(device = rp_pico::hal::pac, peripherals = true, dispatchers = [ADC_IRQ_FIFO, UART1_IRQ, DMA_IRQ_1])]    
+mod app {
 
-// Thermocouple Controller
-pub mod thermocouple_controller;
-use thermocouple_controller::{ThermocoupleController, TCChannel};
+    use embedded_hal::digital::v2::OutputPin;
+    use fugit::{Duration, MicrosDurationU32, MicrosDurationU64};
+    use defmt::*;
+    use rp_pico::{
+        hal::{self, clocks::init_clocks_and_plls, timer::{monotonic::Monotonic, Alarm, Alarm0}, watchdog::Watchdog, Sio},
+        XOSC_CRYSTAL_FREQ,
+    };
 
-// Pressure Sensor Controller
-pub mod pressure_sensor_controller;
-use pressure_sensor_controller::PressureSensorController;
+    // PWM cycle period.
+    const PWM_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(4167);
+    // PWM Period = TOP*PWM_TICK_US.   Max value for duty-factor:  [0-TOP].  0= off, TOP = 100% on
+    const TOP: u16 = 480;  // Ticks per period
 
+    // Sample period for Alarm2.
+    const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(2000);
 
-/// Entry point
-#[entry]
-fn main() -> ! {
-    // Grab our singleton objects
-    let mut pac = pac::Peripherals::take().unwrap();
-    let core = pac::CorePeripherals::take().unwrap();
+    // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
+    #[monotonic(binds = TIMER_IRQ_0, default = true)]
+    type MyMono = Monotonic<Alarm0>;
 
-    // Set up the watchdog driver - needed by the clock setup code
-    let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
+    #[shared]
+    struct Shared {
+        // Heater PWM stuff
+        alarm1: hal::timer::Alarm1,     // For PWM tick
+        
+        htr_ctr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio15, hal::gpio::PushPullOutput>,
+        htr_ctr_df: u16,
+        htr_fb_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio14, hal::gpio::PushPullOutput>,
+        htr_fb_df: u16,
+        htr_lr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio13, hal::gpio::PushPullOutput>,
+        htr_lr_df: u16,
 
-    // Configure the clocks - default is 125 MHz system clock
-    let clocks = hal::clocks::init_clocks_and_plls(
-        rp_pico::XOSC_CRYSTAL_FREQ,
-        pac.XOSC,
-        pac.CLOCKS,
-        pac.PLL_SYS,
-        pac.PLL_USB,
-        &mut pac.RESETS,
-        &mut watchdog,
-    )
-    .ok()
-    .unwrap();
+        // Sample measurement
+        alarm2: hal::timer::Alarm2,     // For sample tick
+        debug_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio8, hal::gpio::PushPullOutput>,
+    }
 
+    #[local]
+    struct Local {}
 
-    // Delay object
-    //let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    #[init]
+    fn init(c: init::Context) -> (Shared, Local, init::Monotonics) {
+        // --- Init boilerplate ---
+        // Soft-reset does not release the hardware spinlocks
+        // Release them now to avoid a deadlock after debug or watchdog reset
+        unsafe {
+            hal::sio::spinlock_reset();
+        }
+        let mut resets = c.device.RESETS;
+        let mut watchdog = Watchdog::new(c.device.WATCHDOG);
+        let _clocks = init_clocks_and_plls(
+            XOSC_CRYSTAL_FREQ,
+            c.device.XOSC,
+            c.device.CLOCKS,
+            c.device.PLL_SYS,
+            c.device.PLL_USB,
+            &mut resets,
+            &mut watchdog,
+        )
+        .ok()
+        .unwrap();
 
-    // The single-cycle I/O block controls our GPIO pins
-    let sio = hal::Sio::new(pac.SIO);
+        let sio = Sio::new(c.device.SIO);
+        let pins = rp_pico::Pins::new(
+            c.device.IO_BANK0,
+            c.device.PADS_BANK0,
+            sio.gpio_bank0,
+            &mut resets,
+        );
+        // --- End of init boilerplate ---
 
-    // Set the pins up according to their function on this particular board
-    let pins = rp_pico::Pins::new(
-        pac.IO_BANK0,
-        pac.PADS_BANK0,
-        sio.gpio_bank0,
-        &mut pac.RESETS,
-    );
+        // Create new timer.  Provides four alarm interrupts (0-3)
+        let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
 
-    // ----------- VALVE CONTROLLER SETUP ------------
-    // Create the valve controllers and initialize them.
-    // Need to check logic polarity
-    // Might chain init()...
-    let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output());
-    main_chamber_valve.init();
-    let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());
-    bladder_valve.init();
+        // Create alarm0 dedicated to rtic monotonic.
+        // Any number of RTIC scheduled software tasks will be handled by monotonic 
+        let alarm0 = timer.alarm_0().unwrap();     
 
-    // ----------- THERMOCOUPLE CONTROLER SETUP ------------
-    // Chip select pins
-    let cs_ctr = pins.gpio17.into_push_pull_output();
-    let cs_lr = pins.gpio19.into_push_pull_output();
-    let cs_fb = pins.gpio20.into_push_pull_output();
+        // Create alarm1. When alarm1 triggers, it generates interrupt TIMER_IRQ_1
+        let mut alarm1 = timer.alarm_1().unwrap();   
 
-    // Set up SPI CLK and DataIn Lines.  These are implicitly used by the spi driver if they are in the correct mode
-    let _spi_sclk = pins.gpio18.into_mode::<gpio::FunctionSpi>();
-    let _spi_mosi = pins.gpio3.into_mode::<gpio::FunctionSpi>();
-    let _spi_miso = pins.gpio16.into_mode::<gpio::FunctionSpi>();
+        // Create alarm2. When alarm1 triggers, it generates interrupt TIMER_IRQ_2
+        let mut alarm2 = timer.alarm_2().unwrap();   
+        
+        // ----- Set up heater PWMs -----
+        let htr_ctr_pin = pins.gpio15.into_push_pull_output();
+        let htr_ctr_df = 240;
+        let htr_fb_pin = pins.gpio14.into_push_pull_output();
+        let htr_fb_df = 48;
+        let htr_lr_pin = pins.gpio13.into_push_pull_output();
+        let htr_lr_df = 480-48;
 
-    // Set up spi
-    let spi = spi::Spi::<_, _, 16>::new(pac.SPI0).init(&mut pac.RESETS, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
+        // Schedule the first HW interrupt task.
+        let _ = alarm1.schedule(PWM_TICK_US);
+        alarm1.enable_interrupt();
 
-    let mut tc_controller = ThermocoupleController::new(cs_ctr, cs_lr, cs_fb, spi);
-    tc_controller.init();
+        // Schedule the first HW interrupt task.
+        let _ = alarm2.schedule(SAMPLE_TICK_US);
+        alarm2.enable_interrupt();
 
-    // --------------- PRESSURE SENSOR CONTROLLER -----------
-    // Configure the auxiliary pins
-    let ad_start_pin = pins.gpio6.into_push_pull_output();      // Active low??
-    let ad_busy_pin = pins.gpio7.into_floating_input();        // AD Alert/Busy pin
+        let debug_pin = pins.gpio8.into_push_pull_output();
+        // Init and return the Shared data structure
+        (Shared { 
+            alarm1, htr_ctr_pin, htr_ctr_df, htr_fb_pin, htr_fb_df, htr_lr_pin, htr_lr_df,
+            alarm2, debug_pin,
+            }, 
+        Local {}, 
+        init::Monotonics(Monotonic::new(timer, alarm0))
+        )
+    }
 
-    // Configure sda & scl pins for I2C
-    let sda_pin = pins.gpio4.into_mode::<gpio::FunctionI2C>();
-    let scl_pin = pins.gpio5.into_mode::<gpio::FunctionI2C>();
+    // -- TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.
+    #[task(
+        priority = 2, 
+        binds = TIMER_IRQ_1,  
+        shared = [alarm1, htr_ctr_pin, htr_ctr_df, htr_fb_pin, htr_fb_df, htr_lr_pin, htr_lr_df ],
+        local = [counter: u16 = 0],
+    )]
+    fn pwm_period_task (c: pwm_period_task::Context) { 
 
-    // Configure the I2C0 device
-    let i2c = rp2040_hal::I2C::i2c0(
-        pac.I2C0,
-        sda_pin,
-        scl_pin,
-        400.kHz(),
-        &mut pac.RESETS,
-        &clocks.peripheral_clock,
-    );
+        let mut alarm = c.shared.alarm1;
+        (alarm).lock(|a|{
+            a.clear_interrupt();
+            let _ = a.schedule(PWM_TICK_US);
+        });
 
-    // Create new PressureSensorController
-    let mut pressure_sensor_controller = PressureSensorController::new(ad_start_pin, ad_busy_pin, i2c);
-    pressure_sensor_controller.init();
+        // Increment and wrap counter if necesary
+        *c.local.counter += 1;
+        if *c.local.counter == TOP {*c.local.counter =0;}
 
-    let mut temps = tc_controller.read_temps(TCChannel::Center);
-    // Main loop forever
-    loop {
-        temps = tc_controller.read_temps(TCChannel::Center);
-        info!("Channel: {:?} \t\tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
-        temps = tc_controller.read_temps(TCChannel::LeftRight);
-        info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
-        temps = tc_controller.read_temps(TCChannel::FrontBack);
-        info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+        // Center heater pwm
+        (c.shared.htr_ctr_df,c.shared.htr_ctr_pin).lock(|d,p| {
+            if *c.local.counter < *d { p.set_high().unwrap(); } 
+            else { p.set_low().unwrap(); }    
+        });
 
-        let measurement = pressure_sensor_controller.read_pressures();
-        info!("PRESSURE----Channel: {:?} \tPressure: {=f32}", measurement.channel_index, measurement.pressure_pa);
+        // Front-Back heater pwm
+        (c.shared.htr_fb_df,c.shared.htr_fb_pin).lock(|d,p| {
+            if *c.local.counter < *d { p.set_high().unwrap(); } 
+            else { p.set_low().unwrap(); }    
+        });
 
-        println!("------");
-        delay.delay_ms(1000);
+        // Left-Right heater pwm
+        (c.shared.htr_lr_df,c.shared.htr_lr_pin).lock(|d,p| {
+            if *c.local.counter < *d { p.set_high().unwrap(); } 
+            else { p.set_low().unwrap(); }    
+        });
 
     }
+
+    // -- TASK: Hardware task coupled to Alarm2/TIMER_IRQ_2.
+    #[task(
+        priority = 2, 
+        binds = TIMER_IRQ_2,  
+        shared = [alarm2, debug_pin],
+        local = [toggle: bool = true],
+    )]
+    fn sample_period_task (mut c: sample_period_task::Context) { 
+        if *c.local.toggle {
+            c.shared.debug_pin.lock(|l| l.set_high().unwrap());
+        } else {
+            c.shared.debug_pin.lock(|l| l.set_low().unwrap());
+        }
+        *c.local.toggle = !*c.local.toggle;
+
+
+        let mut alarm = c.shared.alarm2;
+        (alarm).lock(|a|{
+            a.clear_interrupt();
+            let _ = a.schedule(SAMPLE_TICK_US);
+        });
+    }
 }
-
-
-// End of file
