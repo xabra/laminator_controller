@@ -20,13 +20,13 @@ mod app {
         XOSC_CRYSTAL_FREQ,
     };
 
-    // PWM cycle period. Hardware tasks (alarms) are scheduled using time represented by a MicrosDurationU32
-    // That is, it must be a Duration<u32, 1, 1000000>:  a u32 representing time in MICROSECONDS.
+    // PWM cycle period.
     const PWM_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(4167);
-
     // PWM Period = TOP*PWM_TICK_US.   Max value for duty-factor:  [0-TOP].  0= off, TOP = 100% on
     const TOP: u16 = 480;  // Ticks per period
 
+    // Sample period for Alarm2.
+    const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(2000);
 
     // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
@@ -35,13 +35,18 @@ mod app {
     #[shared]
     struct Shared {
         // Heater PWM stuff
-        alarm1: hal::timer::Alarm1,     // HW IRQ 
+        alarm1: hal::timer::Alarm1,     // For PWM tick
+        
         htr_ctr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio15, hal::gpio::PushPullOutput>,
         htr_ctr_df: u16,
         htr_fb_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio14, hal::gpio::PushPullOutput>,
         htr_fb_df: u16,
         htr_lr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio13, hal::gpio::PushPullOutput>,
         htr_lr_df: u16,
+
+        // Sample measurement
+        alarm2: hal::timer::Alarm2,     // For sample tick
+        debug_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio8, hal::gpio::PushPullOutput>,
     }
 
     #[local]
@@ -76,9 +81,6 @@ mod app {
             sio.gpio_bank0,
             &mut resets,
         );
-
-            // Grab our singleton objects
-
         // --- End of init boilerplate ---
 
         // Create new timer.  Provides four alarm interrupts (0-3)
@@ -89,8 +91,10 @@ mod app {
         let alarm0 = timer.alarm_0().unwrap();     
 
         // Create alarm1. When alarm1 triggers, it generates interrupt TIMER_IRQ_1
-        // This interrupt will be bound to a hardware task that services the interrupt.
         let mut alarm1 = timer.alarm_1().unwrap();   
+
+        // Create alarm2. When alarm1 triggers, it generates interrupt TIMER_IRQ_2
+        let mut alarm2 = timer.alarm_2().unwrap();   
         
         // ----- Set up heater PWMs -----
         let htr_ctr_pin = pins.gpio15.into_push_pull_output();
@@ -104,8 +108,19 @@ mod app {
         let _ = alarm1.schedule(PWM_TICK_US);
         alarm1.enable_interrupt();
 
+        // Schedule the first HW interrupt task.
+        let _ = alarm2.schedule(SAMPLE_TICK_US);
+        alarm2.enable_interrupt();
+
+        let debug_pin = pins.gpio8.into_push_pull_output();
         // Init and return the Shared data structure
-        (Shared { alarm1, htr_ctr_pin, htr_ctr_df, htr_fb_pin, htr_fb_df, htr_lr_pin, htr_lr_df }, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
+        (Shared { 
+            alarm1, htr_ctr_pin, htr_ctr_df, htr_fb_pin, htr_fb_df, htr_lr_pin, htr_lr_df,
+            alarm2, debug_pin,
+            }, 
+        Local {}, 
+        init::Monotonics(Monotonic::new(timer, alarm0))
+        )
     }
 
     // -- TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.
@@ -145,5 +160,28 @@ mod app {
             else { p.set_low().unwrap(); }    
         });
 
+    }
+
+    // -- TASK: Hardware task coupled to Alarm2/TIMER_IRQ_2.
+    #[task(
+        priority = 2, 
+        binds = TIMER_IRQ_2,  
+        shared = [alarm2, debug_pin],
+        local = [toggle: bool = true],
+    )]
+    fn sample_period_task (mut c: sample_period_task::Context) { 
+        if *c.local.toggle {
+            c.shared.debug_pin.lock(|l| l.set_high().unwrap());
+        } else {
+            c.shared.debug_pin.lock(|l| l.set_low().unwrap());
+        }
+        *c.local.toggle = !*c.local.toggle;
+
+
+        let mut alarm = c.shared.alarm2;
+        (alarm).lock(|a|{
+            a.clear_interrupt();
+            let _ = a.schedule(SAMPLE_TICK_US);
+        });
     }
 }
