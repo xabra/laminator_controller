@@ -22,7 +22,7 @@ mod app {
 
     // PWM cycle period. Hardware tasks (alarms) are scheduled using time represented by a MicrosDurationU32
     // That is, it must be a Duration<u32, 1, 1000000>:  a u32 representing time in MICROSECONDS.
-    const PWM_PERIOD_US: MicrosDurationU32 = MicrosDurationU32::micros(7800);
+    const PWM_PERIOD_US: MicrosDurationU32 = MicrosDurationU32::micros(4167);
 
     // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
@@ -33,6 +33,11 @@ mod app {
         // Heater PWM stuff
         alarm1: hal::timer::Alarm1,     // HW IRQ 
         htr_ctr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio15, hal::gpio::PushPullOutput>,
+        htr_ctr_df: u16,
+        htr_fb_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio14, hal::gpio::PushPullOutput>,
+        htr_fb_df: u16,
+        htr_lr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio13, hal::gpio::PushPullOutput>,
+        htr_lr_df: u16,
     }
 
     #[local]
@@ -81,51 +86,62 @@ mod app {
 
         // Create alarm1. When alarm1 triggers, it generates interrupt TIMER_IRQ_1
         // This interrupt will be bound to a hardware task that services the interrupt.
-        let mut alarm1 = timer.alarm_1().unwrap();  
+        let mut alarm1 = timer.alarm_1().unwrap();   
         
-        // The delay object lets us wait for specified amounts of time (in milliseconds)
-        //let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());  
-        
-        // Grab a pin
+        // ----- Set up heater PWMs -----
+        const TOP: u16 = 480;   // Max value for duty-factor:  [0-TOP].  0= off, TOP = 100% on
         let htr_ctr_pin = pins.gpio15.into_push_pull_output();
+        let htr_ctr_df = 240;
+        let htr_fb_pin = pins.gpio14.into_push_pull_output();
+        let htr_fb_df = 0;
+        let htr_lr_pin = pins.gpio13.into_push_pull_output();
+        let htr_lr_df = 480;
 
         // Schedule the first HW interrupt task.
         let _ = alarm1.schedule(PWM_PERIOD_US);
         alarm1.enable_interrupt();
 
         // Init and return the Shared data structure
-        (Shared { alarm1, htr_ctr_pin }, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
+        (Shared { alarm1, htr_ctr_pin, htr_ctr_df, htr_fb_pin, htr_fb_df, htr_lr_pin, htr_lr_df }, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
     }
 
     // -- TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.  It starts the PWM cycle by:
-    //     - Set the output pin high
-    //     - Clear the interrupt for this task
-    //     - Schedule a the next iteration of the PWM cycle (this task) based on PWM period
-    //     - Schedule the output pin to be set low after a time corresponding to the PWM pulse width
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_1,  
-        shared = [alarm1, htr_ctr_pin ],
-        local = [toggle: bool = true, counter: u8 = 0],
+        shared = [alarm1, htr_ctr_pin, htr_ctr_df, htr_fb_pin, htr_fb_df, htr_lr_pin, htr_lr_df ],
+        local = [counter: u16 = 0],
     )]
-    fn pwm_period_task (mut c: pwm_period_task::Context) { 
-
-        //const TOP: u8 = 255;
-        const TRIG: u8 = 25;
-
-        *c.local.counter += 1;
-
-        if *c.local.counter < TRIG {
-            c.shared.htr_ctr_pin.lock(|l| l.set_high().unwrap());
-        } else {
-            c.shared.htr_ctr_pin.lock(|l| l.set_low().unwrap());
-        }
+    fn pwm_period_task (c: pwm_period_task::Context) { 
 
         let mut alarm = c.shared.alarm1;
         (alarm).lock(|a|{
             a.clear_interrupt();
             let _ = a.schedule(PWM_PERIOD_US);
         });
+
+        // Increment and wrap counter if necesary
+        *c.local.counter += 1;
+        if *c.local.counter == TOP {*c.local.counter =0;}
+
+        // Center heater pwm
+        (c.shared.htr_ctr_df,c.shared.htr_ctr_pin).lock(|d,p| {
+            if *c.local.counter < *d { p.set_high().unwrap(); } 
+            else { p.set_low().unwrap(); }    
+        });
+
+        // Front-Back heater pwm
+        (c.shared.htr_fb_df,c.shared.htr_fb_pin).lock(|d,p| {
+            if *c.local.counter < *d { p.set_high().unwrap(); } 
+            else { p.set_low().unwrap(); }    
+        });
+
+        // Left-Right heater pwm
+        (c.shared.htr_lr_df,c.shared.htr_lr_pin).lock(|d,p| {
+            if *c.local.counter < *d { p.set_high().unwrap(); } 
+            else { p.set_low().unwrap(); }    
+        });
+
     }
 }
 
