@@ -23,7 +23,7 @@ mod app {
     // PWM cycle period. Hardware tasks (alarms) are scheduled using time represented by a MicrosDurationU32
     // That is, it must be a Duration<u32, 1, 1000000>:  a u32 representing time in MICROSECONDS.
     const PWM_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(4167);
-    
+
     // PWM Period = TOP*PWM_TICK_US.   Max value for duty-factor:  [0-TOP].  0= off, TOP = 100% on
     const TOP: u16 = 480;  // Ticks per period
 
@@ -96,9 +96,9 @@ mod app {
         let htr_ctr_pin = pins.gpio15.into_push_pull_output();
         let htr_ctr_df = 240;
         let htr_fb_pin = pins.gpio14.into_push_pull_output();
-        let htr_fb_df = 0;
+        let htr_fb_df = 48;
         let htr_lr_pin = pins.gpio13.into_push_pull_output();
-        let htr_lr_df = 480;
+        let htr_lr_df = 480-48;
 
         // Schedule the first HW interrupt task.
         let _ = alarm1.schedule(PWM_TICK_US);
