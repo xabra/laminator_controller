@@ -22,7 +22,11 @@ mod app {
 
     // PWM cycle period. Hardware tasks (alarms) are scheduled using time represented by a MicrosDurationU32
     // That is, it must be a Duration<u32, 1, 1000000>:  a u32 representing time in MICROSECONDS.
-    const PWM_PERIOD_US: MicrosDurationU32 = MicrosDurationU32::micros(4167);
+    const PWM_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(4167);
+    
+    // PWM Period = TOP*PWM_TICK_US.   Max value for duty-factor:  [0-TOP].  0= off, TOP = 100% on
+    const TOP: u16 = 480;  // Ticks per period
+
 
     // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
@@ -89,7 +93,6 @@ mod app {
         let mut alarm1 = timer.alarm_1().unwrap();   
         
         // ----- Set up heater PWMs -----
-        const TOP: u16 = 480;   // Max value for duty-factor:  [0-TOP].  0= off, TOP = 100% on
         let htr_ctr_pin = pins.gpio15.into_push_pull_output();
         let htr_ctr_df = 240;
         let htr_fb_pin = pins.gpio14.into_push_pull_output();
@@ -98,14 +101,14 @@ mod app {
         let htr_lr_df = 480;
 
         // Schedule the first HW interrupt task.
-        let _ = alarm1.schedule(PWM_PERIOD_US);
+        let _ = alarm1.schedule(PWM_TICK_US);
         alarm1.enable_interrupt();
 
         // Init and return the Shared data structure
         (Shared { alarm1, htr_ctr_pin, htr_ctr_df, htr_fb_pin, htr_fb_df, htr_lr_pin, htr_lr_df }, Local {}, init::Monotonics(Monotonic::new(timer, alarm0)))
     }
 
-    // -- TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.  It starts the PWM cycle by:
+    // -- TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_1,  
@@ -117,7 +120,7 @@ mod app {
         let mut alarm = c.shared.alarm1;
         (alarm).lock(|a|{
             a.clear_interrupt();
-            let _ = a.schedule(PWM_PERIOD_US);
+            let _ = a.schedule(PWM_TICK_US);
         });
 
         // Increment and wrap counter if necesary
@@ -144,35 +147,3 @@ mod app {
 
     }
 }
-
-    // pub struct Pwm {
-    //     period: Duration<u32,1,1_000_000>,
-    //     duty_factor: u8,
-    //     enabled: bool,
-    // }
-
-    // impl Pwm {
-    //     pub fn new(period:Duration<u32,1,1_000_000>) -> Pwm {
-    //         Pwm {
-    //             period,
-    //             duty_factor: 0,
-    //             enabled: false,
-    //         }
-    //     }
-
-    //     pub fn set_duty_factor (&mut self, duty_factor: u8){
-
-    //         self.duty_factor = duty_factor;
-    //     }       
-
-    //     pub fn set_enabled (&mut self, en: bool) {
-    //         self.enabled = en;
-    //     }
-
-    //     pub fn get_pulse_width (&self) -> MicrosDurationU64{
-    //         let pulse_width_microsec = (((self.period.to_micros() as u32)*(self.duty_factor as u32))/255_u32) as u64;
-    //         //info!("get pulse width: {:?}", pulse_width_microsec);
-    //         MicrosDurationU64::micros(pulse_width_microsec)
-    //     }
-    // }
-
