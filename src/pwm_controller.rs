@@ -4,10 +4,6 @@ use rp_pico::hal::gpio::PinId;
 use rp_pico::hal::gpio::Output;
 use rp_pico::hal::gpio::PushPull;
 
-pub fn duty_factor(df: f32, counter_max: u16) -> u16{
-    (df*(counter_max as f32)) as u16
-}
-
 pub struct PWM <I: PinId> {
     pin: gpio::Pin<I, Output<PushPull>>,
     duty_thresh: u16,
