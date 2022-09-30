@@ -18,12 +18,10 @@ impl <I: PinId> ValveController<I> {
         valve_pin: gpio::Pin<I, Output<PushPull>>, 
     ) -> ValveController<I> {
         ValveController{
-            valve_pin:valve_pin,
+            valve_pin,
         }
     }
-    pub fn init(&mut self)  {
-        self.set_state(ValveState::Pump);
-    }
+
     pub fn set_state(&mut self, state:ValveState){
         match state {
             ValveState::Vent => self.valve_pin.set_high().unwrap(),

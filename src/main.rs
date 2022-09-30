@@ -2,6 +2,7 @@
 #![no_main]
 
 pub mod pwm_controller;
+pub mod valve_controller;
 
 use panic_halt as _;
 use defmt_rtt as _;
@@ -23,6 +24,7 @@ mod app {
     };
   
     use crate::pwm_controller::{PWM};
+    use crate::valve_controller::{ValveController, ValveState};
 
     // PWM cycle period.
     const PWM_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(4167);
@@ -48,6 +50,10 @@ mod app {
         pwm_ctr: PWM<hal::gpio::pin::bank0::Gpio15>,
         pwm_lr: PWM<hal::gpio::pin::bank0::Gpio13>,
         pwm_fb: PWM<hal::gpio::pin::bank0::Gpio14>,
+
+        main_chamber_valve: ValveController<hal::gpio::pin::bank0::Gpio12>,
+        bladder_valve: ValveController<hal::gpio::pin::bank0::Gpio11>,
+
     }
 
     #[local]
@@ -97,7 +103,7 @@ mod app {
         // Create alarm2. When alarm1 triggers, it generates interrupt TIMER_IRQ_2
         let mut alarm2 = timer.alarm_2().unwrap();   
         
-        // ----- Set up heater PWMs -----
+        // ----------- HEATER PWM CONTROLLER SETUP ------------
         let mut pwm_ctr = PWM::new(pins.gpio15.into_push_pull_output());
         pwm_ctr.set_duty_factor(0.5, TOP);
 
@@ -107,6 +113,16 @@ mod app {
         let mut pwm_fb = PWM::new(pins.gpio14.into_push_pull_output());
         pwm_fb.set_duty_factor(0.9, TOP);
 
+        // ----------- VALVE CONTROLLER SETUP ------------
+        // Create the valve controllers and initialize them. Need to check logic polarity
+        let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output());
+        main_chamber_valve.set_state(ValveState::Pump);
+        let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());
+        bladder_valve.set_state(ValveState::Pump);
+
+
+        let debug_pin = pins.gpio8.into_push_pull_output();
+
         // Schedule the first HW interrupt task.
         let _ = alarm1.schedule(PWM_TICK_US);
         alarm1.enable_interrupt();
@@ -115,8 +131,8 @@ mod app {
         let _ = alarm2.schedule(SAMPLE_TICK_US);
         alarm2.enable_interrupt();
 
-        //let debug_pin = pins.gpio8.into_push_pull_output();
-        let debug_pin = pins.gpio8.into_push_pull_output();
+        // Spawn the valve toggle task
+        valve_test_task::spawn_after(MicrosDurationU64::secs(5)).unwrap();
         
         // Init and return the Shared data structure
         (Shared { 
@@ -124,6 +140,7 @@ mod app {
             alarm2,
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
+            main_chamber_valve, bladder_valve,
             }, 
         Local {}, 
         init::Monotonics(Monotonic::new(timer, alarm0))
@@ -193,6 +210,26 @@ mod app {
             a.clear_interrupt();
             let _ = a.schedule(SAMPLE_TICK_US);
         });
+    }
+
+    // ------- VALVE CONTROLLER TEST TASK: -----------.
+    #[task(
+        priority = 1, 
+        shared = [main_chamber_valve, bladder_valve],
+        local = [toggle: bool = true],
+    )]
+    fn valve_test_task (mut c: valve_test_task::Context) { 
+        if *c.local.toggle {
+            c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Pump));
+            c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Pump));
+        } else {
+            c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Vent));
+            c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Vent));
+        }
+        *c.local.toggle = !*c.local.toggle;
+
+
+        valve_test_task::spawn_after(MicrosDurationU64::secs(5)).unwrap();
     }
 
 }
