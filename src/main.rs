@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+pub mod pwm_controller;
+
 use panic_halt as _;
 use defmt_rtt as _;
 
@@ -19,6 +21,8 @@ mod app {
         hal::{self, clocks::init_clocks_and_plls, timer::{monotonic::Monotonic, Alarm, Alarm0}, watchdog::Watchdog, Sio},
         XOSC_CRYSTAL_FREQ,
     };
+  
+    use crate::pwm_controller::{PWM};
 
     // PWM cycle period.
     const PWM_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(4167);
@@ -37,16 +41,13 @@ mod app {
         // Heater PWM stuff
         alarm1: hal::timer::Alarm1,     // For PWM tick
         
-        htr_ctr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio15, hal::gpio::PushPullOutput>,
-        htr_ctr_df: u16,
-        htr_fb_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio14, hal::gpio::PushPullOutput>,
-        htr_fb_df: u16,
-        htr_lr_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio13, hal::gpio::PushPullOutput>,
-        htr_lr_df: u16,
-
         // Sample measurement
         alarm2: hal::timer::Alarm2,     // For sample tick
         debug_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio8, hal::gpio::PushPullOutput>,
+
+        pwm_ctr: PWM<hal::gpio::pin::bank0::Gpio15>,
+        pwm_lr: PWM<hal::gpio::pin::bank0::Gpio13>,
+        pwm_fb: PWM<hal::gpio::pin::bank0::Gpio14>,
     }
 
     #[local]
@@ -97,12 +98,14 @@ mod app {
         let mut alarm2 = timer.alarm_2().unwrap();   
         
         // ----- Set up heater PWMs -----
-        let htr_ctr_pin = pins.gpio15.into_push_pull_output();
-        let htr_ctr_df = 240;
-        let htr_fb_pin = pins.gpio14.into_push_pull_output();
-        let htr_fb_df = 48;
-        let htr_lr_pin = pins.gpio13.into_push_pull_output();
-        let htr_lr_df = 480-48;
+        let mut pwm_ctr = PWM::new(pins.gpio15.into_push_pull_output());
+        pwm_ctr.set_duty_factor(0.5, TOP);
+
+        let mut pwm_lr = PWM::new(pins.gpio13.into_push_pull_output());
+        pwm_lr.set_duty_factor(0.1, TOP);
+
+        let mut pwm_fb = PWM::new(pins.gpio14.into_push_pull_output());
+        pwm_fb.set_duty_factor(0.9, TOP);
 
         // Schedule the first HW interrupt task.
         let _ = alarm1.schedule(PWM_TICK_US);
@@ -112,25 +115,29 @@ mod app {
         let _ = alarm2.schedule(SAMPLE_TICK_US);
         alarm2.enable_interrupt();
 
+        //let debug_pin = pins.gpio8.into_push_pull_output();
         let debug_pin = pins.gpio8.into_push_pull_output();
+        
         // Init and return the Shared data structure
         (Shared { 
-            alarm1, htr_ctr_pin, htr_ctr_df, htr_fb_pin, htr_fb_df, htr_lr_pin, htr_lr_df,
-            alarm2, debug_pin,
+            alarm1,
+            alarm2,
+            debug_pin,
+            pwm_ctr, pwm_lr, pwm_fb,
             }, 
         Local {}, 
         init::Monotonics(Monotonic::new(timer, alarm0))
         )
     }
 
-    // -- TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.
+    // -- HEATER PWM TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_1,  
-        shared = [alarm1, htr_ctr_pin, htr_ctr_df, htr_fb_pin, htr_fb_df, htr_lr_pin, htr_lr_df ],
+        shared = [alarm1, pwm_ctr, pwm_lr, pwm_fb ],
         local = [counter: u16 = 0],
     )]
-    fn pwm_period_task (c: pwm_period_task::Context) { 
+    fn pwm_period_task (mut c: pwm_period_task::Context) { 
 
         let mut alarm = c.shared.alarm1;
         (alarm).lock(|a|{
@@ -143,26 +150,29 @@ mod app {
         if *c.local.counter == TOP {*c.local.counter =0;}
 
         // Center heater pwm
-        (c.shared.htr_ctr_df,c.shared.htr_ctr_pin).lock(|d,p| {
-            if *c.local.counter < *d { p.set_high().unwrap(); } 
-            else { p.set_low().unwrap(); }    
+        (c.shared.pwm_ctr).lock(|p| {
+            if *c.local.counter < p.get_duty_threshold() { 
+                p.set_high(); 
+            } else { p.set_low(); }    
         });
 
         // Front-Back heater pwm
-        (c.shared.htr_fb_df,c.shared.htr_fb_pin).lock(|d,p| {
-            if *c.local.counter < *d { p.set_high().unwrap(); } 
-            else { p.set_low().unwrap(); }    
+        (c.shared.pwm_fb).lock(|p| {
+            if *c.local.counter < p.get_duty_threshold() { 
+                p.set_high(); 
+            } else { p.set_low(); }    
         });
 
         // Left-Right heater pwm
-        (c.shared.htr_lr_df,c.shared.htr_lr_pin).lock(|d,p| {
-            if *c.local.counter < *d { p.set_high().unwrap(); } 
-            else { p.set_low().unwrap(); }    
+        (c.shared.pwm_lr).lock(|p| {
+            if *c.local.counter < p.get_duty_threshold() { 
+                p.set_high(); 
+            } else { p.set_low(); }    
         });
 
     }
 
-    // -- TASK: Hardware task coupled to Alarm2/TIMER_IRQ_2.
+    // -- SIGNAL PROCESSING TASK: Hardware task coupled to Alarm2/TIMER_IRQ_2.
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_2,  
@@ -184,4 +194,5 @@ mod app {
             let _ = a.schedule(SAMPLE_TICK_US);
         });
     }
+
 }
