@@ -30,7 +30,7 @@ mod app {
     use rp_pico::hal::pac::I2C0;
     use rp_pico::hal::I2C;
     use rp_pico::hal::gpio::Pin;
-    use rp_pico::hal::gpio::Function;
+    use rp_pico::hal::gpio::FunctionI2C;
 
     use crate::pwm_controller::PWM;
     use crate::valve_controller::{ValveController, ValveState};
@@ -72,7 +72,7 @@ mod app {
         tc_controller: ThermocoupleController<Gpio17, Gpio19, Gpio20, SPI0>,
 
         // Pressure Sensor Controller
-        pressure_sensor_controller: PressureSensorController<Gpio6, Gpio7, I2C<I2C0, (Pin<Gpio4, Function<I2C>>, Pin<Gpio5, Function<I2C>>)>>,
+        pressure_sensor_controller: PressureSensorController<Gpio6, Gpio7, I2C<I2C0, (Pin<Gpio4, FunctionI2C>, Pin<Gpio5, FunctionI2C>)>>,
     }
 
     #[local]
@@ -167,11 +167,12 @@ mod app {
 
         // Configure the I2C0 device
         let i2c = rp2040_hal::I2C::i2c0(
-            c.device.pac.I2C0,
+            c.device.I2C0,
             sda_pin,
             scl_pin,
             400.kHz(),
-            &mut c.device.pac.RESETS,
+            &mut resets,
+   //         c.device.RESETS,
             &clocks.peripheral_clock,
     );
 
@@ -260,30 +261,33 @@ mod app {
         local = [toggle: bool = true],
     )]
     fn sample_period_task (mut c: sample_period_task::Context) { 
-        if *c.local.toggle {
-            c.shared.debug_pin.lock(|l| l.set_high().unwrap());
-        } else {
-            c.shared.debug_pin.lock(|l| l.set_low().unwrap());
-        }
-        *c.local.toggle = !*c.local.toggle;
+        // if *c.local.toggle {
+        //     c.shared.debug_pin.lock(|l| l.set_high().unwrap());
+        // } else {
+        //     c.shared.debug_pin.lock(|l| l.set_low().unwrap());
+        // }
+        // *c.local.toggle = !*c.local.toggle;
+        c.shared.debug_pin.lock(|l| l.set_high().unwrap());
 
         c.shared.tc_controller.lock(|tcc: _| {
             let mut temps = tcc.read_temps(TCChannel::Center);
-            info!("Channel: {:?} \t\tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+            //info!("Channel: {:?} \t\tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
             temps = tcc.read_temps(TCChannel::LeftRight);
-            info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+            //info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
             temps = tcc.read_temps(TCChannel::FrontBack);
-            info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+            //info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
         });
         
 
         c.shared.pressure_sensor_controller.lock(|psc: _| {
-            let mut measurement = psc.read_pressures();
-            info!("PRESSURE----Channel: {:?} \tPressure: {=f32}", measurement.channel_index, measurement.pressure_pa);
+            let pressure = psc.read_pressures();
+            //info!("PRESSURE----Channel: {:?} \tPressure: {=f32}", pressure.channel_index, pressure.pressure_pa);
         });
         
 
-        println!("------");
+        //println!("------");
+
+        c.shared.debug_pin.lock(|l| l.set_low().unwrap());
 
         let mut alarm = c.shared.alarm2;
         (alarm).lock(|a|{
