@@ -3,6 +3,8 @@
 
 pub mod pwm_controller;
 pub mod valve_controller;
+pub mod thermocouple_controller;
+pub mod pressure_sensor_controller;
 
 use panic_halt as _;
 use defmt_rtt as _;
@@ -16,15 +18,25 @@ This is RTIC version
 mod app {
 
     use embedded_hal::digital::v2::OutputPin;
-    use fugit::{Duration, MicrosDurationU32, MicrosDurationU64};
+    use fugit::{MicrosDurationU32, MicrosDurationU64 ,RateExtU32};
     use defmt::*;
     use rp_pico::{
         hal::{self, clocks::init_clocks_and_plls, timer::{monotonic::Monotonic, Alarm, Alarm0}, watchdog::Watchdog, Sio},
         XOSC_CRYSTAL_FREQ,
     };
-  
-    use crate::pwm_controller::{PWM};
+    use rp_pico::hal::gpio::pin::bank0::{Gpio4, Gpio5, Gpio6, Gpio7, Gpio8, Gpio11, Gpio12, Gpio13, Gpio14, Gpio15, Gpio17, Gpio19, Gpio20};
+    use rp_pico::hal::spi;
+    use rp_pico::hal::pac::SPI0;
+    use rp_pico::hal::pac::I2C0;
+    use rp_pico::hal::I2C;
+    use rp_pico::hal::gpio::Pin;
+    use rp_pico::hal::gpio::Function;
+
+    use crate::pwm_controller::PWM;
     use crate::valve_controller::{ValveController, ValveState};
+    use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
+    use crate::pressure_sensor_controller::PressureSensorController;
+
 
     // PWM cycle period.
     const PWM_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(4167);
@@ -32,7 +44,7 @@ mod app {
     const TOP: u16 = 480;  // Ticks per period
 
     // Sample period for Alarm2.
-    const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(2000);
+    const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(2_000_000);
 
     // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
@@ -45,15 +57,22 @@ mod app {
         
         // Sample measurement
         alarm2: hal::timer::Alarm2,     // For sample tick
-        debug_pin: hal::gpio::Pin<hal::gpio::pin::bank0::Gpio8, hal::gpio::PushPullOutput>,
+        debug_pin: hal::gpio::Pin<Gpio8, hal::gpio::PushPullOutput>,
 
-        pwm_ctr: PWM<hal::gpio::pin::bank0::Gpio15>,
-        pwm_lr: PWM<hal::gpio::pin::bank0::Gpio13>,
-        pwm_fb: PWM<hal::gpio::pin::bank0::Gpio14>,
+        // Heater PWMs
+        pwm_ctr: PWM<Gpio15>,
+        pwm_lr: PWM<Gpio13>,
+        pwm_fb: PWM<Gpio14>,
 
-        main_chamber_valve: ValveController<hal::gpio::pin::bank0::Gpio12>,
-        bladder_valve: ValveController<hal::gpio::pin::bank0::Gpio11>,
+        // Valves
+        main_chamber_valve: ValveController<Gpio12>,
+        bladder_valve: ValveController<Gpio11>,
 
+        // Thermocouple
+        tc_controller: ThermocoupleController<Gpio17, Gpio19, Gpio20, SPI0>,
+
+        // Pressure Sensor Controller
+        pressure_sensor_controller: PressureSensorController<Gpio6, Gpio7, I2C<I2C0, (Pin<Gpio4, Function<I2C>>, Pin<Gpio5, Function<I2C>>)>>,
     }
 
     #[local]
@@ -69,7 +88,7 @@ mod app {
         }
         let mut resets = c.device.RESETS;
         let mut watchdog = Watchdog::new(c.device.WATCHDOG);
-        let _clocks = init_clocks_and_plls(
+        let clocks = init_clocks_and_plls(
             XOSC_CRYSTAL_FREQ,
             c.device.XOSC,
             c.device.CLOCKS,
@@ -120,8 +139,50 @@ mod app {
         let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());
         bladder_valve.set_state(ValveState::Pump);
 
+        // ------------- THERMOCOUPLE CONTROLLER ---------
+        // Chip select pins
+        let cs_ctr = pins.gpio17.into_push_pull_output();
+        let cs_lr = pins.gpio19.into_push_pull_output();
+        let cs_fb = pins.gpio20.into_push_pull_output();
 
+        // Set up SPI CLK and DataIn Lines.  These are implicitly used by the spi driver if they are in the correct mode
+        let _spi_sclk = pins.gpio18.into_mode::<rp2040_hal::gpio::FunctionSpi>();
+        let _spi_mosi = pins.gpio3.into_mode::<rp2040_hal::gpio::FunctionSpi>();
+        let _spi_miso = pins.gpio16.into_mode::<rp2040_hal::gpio::FunctionSpi>();
+
+        // Set up spi
+        let spi = spi::Spi::<_, _, 16>::new(c.device.SPI0).init(&mut resets, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
+
+        let mut tc_controller = ThermocoupleController::new(cs_ctr, cs_lr, cs_fb, spi);
+        tc_controller.init();
+
+        // --------------- PRESSURE SENSOR CONTROLLER -----------
+        // Configure the auxiliary pins
+        let ad_start_pin = pins.gpio6.into_push_pull_output();      // Active low??
+        let ad_busy_pin = pins.gpio7.into_floating_input();        // AD Alert/Busy pin
+
+        // Configure sda & scl pins for I2C
+        let sda_pin = pins.gpio4.into_mode::<rp2040_hal::gpio::FunctionI2C>();
+        let scl_pin = pins.gpio5.into_mode::<rp2040_hal::gpio::FunctionI2C>();
+
+        // Configure the I2C0 device
+        let i2c = rp2040_hal::I2C::i2c0(
+            c.device.pac.I2C0,
+            sda_pin,
+            scl_pin,
+            400.kHz(),
+            &mut c.device.pac.RESETS,
+            &clocks.peripheral_clock,
+    );
+
+        // Create new PressureSensorController
+        let mut pressure_sensor_controller = PressureSensorController::new(ad_start_pin, ad_busy_pin, i2c);
+        pressure_sensor_controller.init();
+
+
+        // --------- DEBUG PIN
         let debug_pin = pins.gpio8.into_push_pull_output();
+
 
         // Schedule the first HW interrupt task.
         let _ = alarm1.schedule(PWM_TICK_US);
@@ -141,6 +202,8 @@ mod app {
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
             main_chamber_valve, bladder_valve,
+            tc_controller,
+            pressure_sensor_controller,
             }, 
         Local {}, 
         init::Monotonics(Monotonic::new(timer, alarm0))
@@ -193,7 +256,7 @@ mod app {
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_2,  
-        shared = [alarm2, debug_pin],
+        shared = [alarm2, debug_pin, tc_controller, pressure_sensor_controller],
         local = [toggle: bool = true],
     )]
     fn sample_period_task (mut c: sample_period_task::Context) { 
@@ -204,6 +267,23 @@ mod app {
         }
         *c.local.toggle = !*c.local.toggle;
 
+        c.shared.tc_controller.lock(|tcc: _| {
+            let mut temps = tcc.read_temps(TCChannel::Center);
+            info!("Channel: {:?} \t\tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+            temps = tcc.read_temps(TCChannel::LeftRight);
+            info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+            temps = tcc.read_temps(TCChannel::FrontBack);
+            info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+        });
+        
+
+        c.shared.pressure_sensor_controller.lock(|psc: _| {
+            let mut measurement = psc.read_pressures();
+            info!("PRESSURE----Channel: {:?} \tPressure: {=f32}", measurement.channel_index, measurement.pressure_pa);
+        });
+        
+
+        println!("------");
 
         let mut alarm = c.shared.alarm2;
         (alarm).lock(|a|{
