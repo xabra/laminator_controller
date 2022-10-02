@@ -172,7 +172,6 @@ mod app {
             scl_pin,
             400.kHz(),
             &mut resets,
-   //         c.device.RESETS,
             &clocks.peripheral_clock,
     );
 
@@ -189,7 +188,7 @@ mod app {
         let _ = alarm1.schedule(PWM_TICK_US);
         alarm1.enable_interrupt();
 
-        // Schedule the first HW interrupt task.
+        // Schedule the high speed data sampling HW interrupt task.
         let _ = alarm2.schedule(SAMPLE_TICK_US);
         alarm2.enable_interrupt();
 
