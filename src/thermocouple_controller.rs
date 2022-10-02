@@ -44,7 +44,7 @@ pub enum TCError {
 pub struct Temperatures {
     pub channel: TCChannel,
     pub tc_temp: f32,
-    pub ref_temp: f32,
+    //pub ref_temp: f32,
     pub error: Option<TCError>,
 }
 // Lousy code- should use anypin...
@@ -76,20 +76,17 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
         self.deselect_all ();
     }
 
-    pub fn read_temps(&mut self, channel: TCChannel) -> Temperatures {
+    pub fn acquire(&mut self, channel: TCChannel) -> Result<f32,TCError> {
         // Read raw data
         let (w0,w1) = self.read_raw(channel);
 
-        //info!("RAW ::: Temp: {=u16}   Ref Temp:{=u16}", w0, w1);
+        // Check for an error
         match self.get_tc_error(w1) {
             Some(error) => {
-                return Temperatures { channel, tc_temp:0.0, ref_temp: 0.0,  error: Some(error)}
+                return Err(error);
             },
             None => {
-                let tc_temp = self.tc_temperature_degc(w0);
-                let ref_temp = self.ref_temperature_degc(w1);
-                //info!("READ TEMPS::: Temp: {=f32}   Ref Temp:{=f32}", tc_temp, ref_temp);
-                return Temperatures { channel, tc_temp, ref_temp, error: None};
+                Ok(self.tc_temperature_degc(w0))
             }
         }
     }
@@ -176,7 +173,6 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
         } else if SCV_ERROR_MASK & low_word != 0 {
             return Some(TCError::TempSensorShortToVCC);
         }
-        
         None  // Default: return no error
     }
     

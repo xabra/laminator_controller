@@ -35,7 +35,8 @@ pub struct PressureSensorController<I1, I2, P> where
     {
     ad_start_pin: gpio::Pin<I1, Output<PushPull>>,
     ad_busy_pin: gpio::Pin<I2, Input<Floating>>,
-    i2c: P,      
+    i2c: P,  
+    pressures: [f32;4],  // A place to cache the results
 }
 
 impl <I1, I2, P> PressureSensorController<I1, I2, P> where
@@ -53,6 +54,7 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
             ad_start_pin,
             ad_busy_pin,
             i2c,
+            pressures: [0.0_f32; 4],
         }
     }
     pub fn 
@@ -74,7 +76,7 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
             Err(_) => panic!("I2C Write error"),
         };
     }
-    fn start_conversion(&mut self) {
+    fn trigger_conversion(&mut self) {
         // Generate conversion start pulse.
         self.ad_start_pin.set_high().unwrap();   // Power up the converter
         cortex_m::asm::delay(300);// Remain high for minimum pulse width (~1us)
@@ -82,9 +84,9 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
         cortex_m::asm::delay(300);  // Delay for conversion to finish before i2c reading (~2us)
     }
 
-    pub fn read_pressures(&mut self) -> PressureMeasurement {
+    pub fn acquire_one_channel(&mut self) -> (usize, f32) {
         let mut buf = [0; 2];
-        self.start_conversion();
+        self.trigger_conversion();
 
         // Do i2c read from conversion
         let res = self.i2c.read(I2C_BUS_ADDRESS, &mut buf);  //.unwrap() fails...
@@ -92,12 +94,25 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
             Ok(()) => (),
             Err(_) => panic!("I2C Read error"),
         };
-        let channel_index = raw_to_channel_index(buf[0]);
+        let channel_index = raw_to_channel_index(buf[0]) as usize;
         let counts = raw_to_counts (buf[0], buf[1]);
         let volts = counts_to_volts (counts);
         let pressure_pa = volts_to_pressure_pa(volts);
 
-        PressureMeasurement { channel_index, pressure_pa } // Return pressure measurement struct
+        (channel_index, pressure_pa ) // Return pressure measurement tuple
+    }
+
+    pub fn acquire_all(&mut self) {
+
+        let (ch, p) = self.acquire_one_channel();
+        self.pressures[ch] = p;
+        let (ch, p) = self.acquire_one_channel();
+        self.pressures[ch] = p;
+
+    }
+
+    pub fn get_pressure(&mut self, channel: usize) -> f32 {
+        self.pressures[channel]
     }
 }
 
