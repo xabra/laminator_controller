@@ -261,31 +261,29 @@ mod app {
         local = [toggle: bool = true],
     )]
     fn sample_period_task (mut c: sample_period_task::Context) { 
-        // if *c.local.toggle {
-        //     c.shared.debug_pin.lock(|l| l.set_high().unwrap());
-        // } else {
-        //     c.shared.debug_pin.lock(|l| l.set_low().unwrap());
-        // }
-        // *c.local.toggle = !*c.local.toggle;
+
         c.shared.debug_pin.lock(|l| l.set_high().unwrap());
 
+        let mut temp_ctr:f32 = 0.0;
+        let mut temp_lr:f32 = 0.0;
+        let mut temp_fb:f32 = 0.0;
         c.shared.tc_controller.lock(|tcc: _| {
-            let mut temps = tcc.read_temps(TCChannel::Center);
-            //info!("Channel: {:?} \t\tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
-            temps = tcc.read_temps(TCChannel::LeftRight);
-            //info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
-            temps = tcc.read_temps(TCChannel::FrontBack);
-            //info!("Channel: {:?} \tTemp: {=f32}\tRef Temp: {=f32}   \tError: {:?}", temps.channel, temps.tc_temp, temps.ref_temp, temps.error);
+            // TODO : Handle these errors !
+            temp_ctr = tcc.acquire(TCChannel::Center).unwrap();
+            temp_lr = tcc.acquire(TCChannel::LeftRight).unwrap();
+            temp_fb = tcc.acquire(TCChannel::FrontBack).unwrap();
+
         });
         
-
-        c.shared.pressure_sensor_controller.lock(|psc: _| {
-            let pressure = psc.read_pressures();
-            //info!("PRESSURE----Channel: {:?} \tPressure: {=f32}", pressure.channel_index, pressure.pressure_pa);
+        let mut p_chamber:f32 = 0.0;
+        let mut p_bladder:f32 = 0.0;
+        (c.shared.pressure_sensor_controller).lock(|psc: _| {
+            psc.acquire_all();
+            p_chamber = psc.get_pressure(0);
+            p_bladder = psc.get_pressure(2);
         });
-        
 
-        //println!("------");
+        info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?}, \t{:?}", temp_ctr, temp_lr, temp_fb, p_chamber, p_bladder);
 
         c.shared.debug_pin.lock(|l| l.set_low().unwrap());
 
