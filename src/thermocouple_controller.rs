@@ -14,8 +14,8 @@ use TCChannel::{Center, LeftRight, FrontBack};
 
 // Constants
 const HIGH_WORD_DATA_MASK:u16 = 0b1111_1111_1111_1100;
-const LOW_WORD_DATA_MASK:u16 = 0b1111_1111_1111_1000;
-const TC_ERROR_MASK:u16 = 0b0000_0000_0000_0001;// Some TC error.  Unused for now.
+const LOW_WORD_DATA_MASK:u16 = 0b1111_1111_1111_1000; // Unused for now.
+const TC_ERROR_MASK:u16 = 0b0000_0000_0000_0001;      // Some TC error.  Unused for now.
 const OC_ERROR_MASK:u16 = 0b0000_0000_0000_0001;      // Open Circuit error
 const SCG_ERROR_MASK:u16 = 0b0000_0000_0000_0010;     // Short Circuit to GND error
 const SCV_ERROR_MASK:u16 = 0b0000_0000_0000_0100;     // Short Circuit to VCC error
