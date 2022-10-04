@@ -6,6 +6,7 @@ pub mod valve_controller;
 pub mod thermocouple_controller;
 pub mod pressure_sensor_controller;
 pub mod signal_processing;
+pub mod data_structs;
 
 use panic_halt as _;
 use defmt_rtt as _;
@@ -18,6 +19,7 @@ This is RTIC version
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true, dispatchers = [ADC_IRQ_FIFO, UART1_IRQ, DMA_IRQ_1])]    
 mod app {
 
+    
     use embedded_hal::digital::v2::OutputPin;
     use fugit::{MicrosDurationU32, MicrosDurationU64 ,RateExtU32};
     use defmt::*;
@@ -38,6 +40,7 @@ mod app {
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
     use crate::signal_processing::MovingAverageFilter;
+    use crate::data_structs::Measurement;
 
 
     // PWM cycle period.
@@ -78,6 +81,9 @@ mod app {
 
         // Pressure Sensor Controller
         pressure_sensor_controller: PressureSensorController<Gpio6, Gpio7, I2C<I2C0, (Pin<Gpio4, FunctionI2C>, Pin<Gpio5, FunctionI2C>)>>,
+
+        // Measurement data
+        measurement: Measurement,
     }
 
     #[local]
@@ -87,11 +93,6 @@ mod app {
         temp_fb_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_chamber_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_bladder_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
-        temp_ctr_filtered: f32,
-        temp_lr_filtered: f32,
-        temp_fb_filtered: f32,
-        p_chamber_filtered: f32,
-        p_bladder_filtered: f32,
     }
 
     #[init]
@@ -201,11 +202,14 @@ mod app {
         let temp_fb_filter = MovingAverageFilter::<f32, 50>::new();
         let p_chamber_filter = MovingAverageFilter::<f32, 50>::new();
         let p_bladder_filter = MovingAverageFilter::<f32, 50>::new();
-        let temp_ctr_filtered=0.0;
-        let temp_lr_filtered = 0.0;
-        let temp_fb_filtered = 0.0;
-        let p_chamber_filtered = 0.0;
-        let p_bladder_filtered = 0.0;
+
+        let measurement = Measurement {
+            temp_ctr: 0.0,
+            temp_lr: 0.0,
+            temp_fb: 0.0,   
+            p_chamber: 0.0,
+            p_bladder: 0.0,
+        };
 
         // --------- DEBUG PIN
         let debug_pin = pins.gpio8.into_push_pull_output();
@@ -231,6 +235,7 @@ mod app {
             main_chamber_valve, bladder_valve,
             tc_controller,
             pressure_sensor_controller,
+            measurement,
             }, 
         Local {
             temp_ctr_filter,
@@ -238,11 +243,6 @@ mod app {
             temp_fb_filter,
             p_chamber_filter,
             p_bladder_filter,
-            temp_ctr_filtered,
-            temp_lr_filtered,
-            temp_fb_filtered,
-            p_chamber_filtered,
-            p_bladder_filtered,
             }, 
         init::Monotonics(Monotonic::new(timer, alarm0))
         )
@@ -294,7 +294,7 @@ mod app {
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_2,  
-        shared = [alarm2, debug_pin, tc_controller, pressure_sensor_controller],
+        shared = [alarm2, debug_pin, tc_controller, pressure_sensor_controller, measurement],
         local = [
             toggle: bool = true,
             temp_ctr_filter,
@@ -302,11 +302,6 @@ mod app {
             temp_fb_filter,
             p_chamber_filter,
             p_bladder_filter, 
-            temp_ctr_filtered,
-            temp_lr_filtered,
-            temp_fb_filtered,
-            p_chamber_filtered,
-            p_bladder_filtered,
         ],
     )]
     fn sample_period_task (mut c: sample_period_task::Context) { 
@@ -339,9 +334,14 @@ mod app {
         let p_chamber_filtered = c.local.p_chamber_filter.push(p_chamber);
         let p_bladder_filtered = c.local.p_bladder_filter.push(p_bladder);
 
-        
-        info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?},  \t{:?},  \t{:?},  \t{:?}, \t{:?}, \t{:?}", 
-            temp_ctr, temp_ctr_filtered, temp_lr, temp_lr_filtered, temp_fb, temp_fb_filtered, p_chamber, p_chamber_filtered, p_bladder, p_bladder_filtered);
+        // Lock shared and Write the measurements
+        (c.shared.measurement).lock(|m: _| {
+            m.temp_ctr = temp_ctr_filtered;
+            m.temp_lr = temp_lr_filtered;
+            m.temp_fb = temp_fb_filtered;
+            m.p_chamber = p_chamber_filtered;
+            m.p_bladder = p_bladder_filtered;
+        });
 
         c.shared.debug_pin.lock(|l| l.set_low().unwrap());
 
@@ -355,21 +355,26 @@ mod app {
     // ------- VALVE CONTROLLER TEST TASK: -----------.
     #[task(
         priority = 1, 
-        shared = [main_chamber_valve, bladder_valve],
+        shared = [main_chamber_valve, bladder_valve, measurement],
         local = [toggle: bool = true],
     )]
     fn valve_test_task (mut c: valve_test_task::Context) { 
-        if *c.local.toggle {
-            c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Pump));
-            c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Pump));
-        } else {
-            c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Vent));
-            c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Vent));
-        }
-        *c.local.toggle = !*c.local.toggle;
+        // if *c.local.toggle {
+        //     c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Pump));
+        //     c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Pump));
+        // } else {
+        //     c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Vent));
+        //     c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Vent));
+        // }
+        // *c.local.toggle = !*c.local.toggle;
+
+        c.shared.measurement.lock(|m: _| {
+            info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}", 
+            m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder);            
+        });
 
 
-        valve_test_task::spawn_after(MicrosDurationU64::secs(5)).unwrap();
+        valve_test_task::spawn_after(MicrosDurationU64::secs(1)).unwrap();
     }
 
 }
