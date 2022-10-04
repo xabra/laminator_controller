@@ -37,6 +37,7 @@ mod app {
     use crate::valve_controller::{ValveController, ValveState};
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
+    use crate::signal_processing::MovingAverageFilter;
 
 
     // PWM cycle period.
@@ -45,7 +46,10 @@ mod app {
     const TOP: u16 = 480;  // Ticks per period
 
     // Sample period for Alarm2.
-    const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(2_000_000);
+    const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(200_000);
+
+    // Length of the low pass averaging filter
+    const FILTER_LENGTH: usize = 50;
 
     // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
@@ -77,7 +81,18 @@ mod app {
     }
 
     #[local]
-    struct Local {}
+    struct Local {
+        temp_ctr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
+        temp_lr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
+        temp_fb_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
+        p_chamber_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
+        p_bladder_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
+        temp_ctr_filtered: f32,
+        temp_lr_filtered: f32,
+        temp_fb_filtered: f32,
+        p_chamber_filtered: f32,
+        p_bladder_filtered: f32,
+    }
 
     #[init]
     fn init(c: init::Context) -> (Shared, Local, init::Monotonics) {
@@ -180,12 +195,23 @@ mod app {
         let mut pressure_sensor_controller = PressureSensorController::new(ad_start_pin, ad_busy_pin, i2c);
         pressure_sensor_controller.init();
 
+        // ----- SIGNAL PROCESSING ------
+        let temp_ctr_filter = MovingAverageFilter::<f32, 50>::new();
+        let temp_lr_filter = MovingAverageFilter::<f32, 50>::new();
+        let temp_fb_filter = MovingAverageFilter::<f32, 50>::new();
+        let p_chamber_filter = MovingAverageFilter::<f32, 50>::new();
+        let p_bladder_filter = MovingAverageFilter::<f32, 50>::new();
+        let temp_ctr_filtered=0.0;
+        let temp_lr_filtered = 0.0;
+        let temp_fb_filtered = 0.0;
+        let p_chamber_filtered = 0.0;
+        let p_bladder_filtered = 0.0;
 
         // --------- DEBUG PIN
         let debug_pin = pins.gpio8.into_push_pull_output();
 
 
-        // Schedule the first HW interrupt task.
+        // Schedule the PWM tick HW interrupt task.
         let _ = alarm1.schedule(PWM_TICK_US);
         alarm1.enable_interrupt();
 
@@ -206,7 +232,18 @@ mod app {
             tc_controller,
             pressure_sensor_controller,
             }, 
-        Local {}, 
+        Local {
+            temp_ctr_filter,
+            temp_lr_filter,
+            temp_fb_filter,
+            p_chamber_filter,
+            p_bladder_filter,
+            temp_ctr_filtered,
+            temp_lr_filtered,
+            temp_fb_filtered,
+            p_chamber_filtered,
+            p_bladder_filtered,
+            }, 
         init::Monotonics(Monotonic::new(timer, alarm0))
         )
     }
@@ -258,7 +295,19 @@ mod app {
         priority = 2, 
         binds = TIMER_IRQ_2,  
         shared = [alarm2, debug_pin, tc_controller, pressure_sensor_controller],
-        local = [toggle: bool = true],
+        local = [
+            toggle: bool = true,
+            temp_ctr_filter,
+            temp_lr_filter,
+            temp_fb_filter,
+            p_chamber_filter,
+            p_bladder_filter, 
+            temp_ctr_filtered,
+            temp_lr_filtered,
+            temp_fb_filtered,
+            p_chamber_filtered,
+            p_bladder_filtered,
+        ],
     )]
     fn sample_period_task (mut c: sample_period_task::Context) { 
 
@@ -283,7 +332,16 @@ mod app {
             p_bladder = psc.get_pressure(2);
         });
 
-        info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?}, \t{:?}", temp_ctr, temp_lr, temp_fb, p_chamber, p_bladder);
+        // Filter all input signals
+        let temp_ctr_filtered = c.local.temp_ctr_filter.push(temp_ctr);
+        let temp_lr_filtered = c.local.temp_lr_filter.push(temp_lr);
+        let temp_fb_filtered = c.local.temp_fb_filter.push(temp_fb);
+        let p_chamber_filtered = c.local.p_chamber_filter.push(p_chamber);
+        let p_bladder_filtered = c.local.p_bladder_filter.push(p_bladder);
+
+        
+        info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?},  \t{:?},  \t{:?},  \t{:?}, \t{:?}, \t{:?}", 
+            temp_ctr, temp_ctr_filtered, temp_lr, temp_lr_filtered, temp_fb, temp_fb_filtered, p_chamber, p_chamber_filtered, p_bladder, p_bladder_filtered);
 
         c.shared.debug_pin.lock(|l| l.set_low().unwrap());
 
