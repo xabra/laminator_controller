@@ -5,6 +5,7 @@ pub mod pwm_controller;
 pub mod valve_controller;
 pub mod thermocouple_controller;
 pub mod pressure_sensor_controller;
+pub mod signal_processing;
 
 use panic_halt as _;
 use defmt_rtt as _;

@@ -160,9 +160,9 @@ dependencies = [
 
 [[package]]
 name = "critical-section"
-version = "1.1.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d02ba51481d019be9c74a831d1133c364d78831b75c833478f3a21e1fd91e01a"
+checksum = "6548a0ad5d2549e111e1f6a11a6c2e2d00ce6a3dafe22948d67c2b443f775e52"
 
 [[package]]
 name = "debug-helper"
@@ -283,9 +283,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.10.3"
+version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9a9d19fa1e79b6215ff29b9d6880b706147f16e9b1dbb1e4e5947b5b02bc5e3"
+checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
 dependencies = [
  "either",
 ]
@@ -301,6 +301,8 @@ dependencies = [
  "defmt-rtt",
  "embedded-hal",
  "fugit",
+ "libm",
+ "num-traits",
  "panic-halt",
  "rp-pico",
  "rp2040-hal",
@@ -312,6 +314,12 @@ name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+
+[[package]]
+name = "libm"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "292a948cd991e376cf75541fe5b97a1081d713c618b4f1b9500f8844e49eb565"
 
 [[package]]
 name = "lock_api"
@@ -343,6 +351,16 @@ name = "nb"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "546c37ac5d9e56f55e73b677106873d9d9f5190605e41a856503623648488cae"
+
+[[package]]
+name = "num-traits"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
+dependencies = [
+ "autocfg",
+ "libm",
+]
 
 [[package]]
 name = "num_enum"
@@ -431,9 +449,9 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d34f1408f55294453790c48b2f1ebbb1c5b4b7563eb1f418bcfcfdbb06ebb4e7"
+checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 
 [[package]]
 name = "regex"
@@ -476,7 +494,7 @@ dependencies = [
 [[package]]
 name = "rp-pico"
 version = "0.5.0"
-source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#5aa7ee7923a3fe28d6b64a3d83a74eb9c6ae28c8"
+source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#9cfc543bee69fd6b9bf8da920d413a6295b7aba2"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -498,12 +516,12 @@ dependencies = [
 [[package]]
 name = "rp2040-hal"
 version = "0.6.0"
-source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#5aa7ee7923a3fe28d6b64a3d83a74eb9c6ae28c8"
+source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#9cfc543bee69fd6b9bf8da920d413a6295b7aba2"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "critical-section 0.2.7",
- "critical-section 1.1.0",
+ "critical-section 1.1.1",
  "embedded-hal",
  "fugit",
  "itertools",
@@ -522,7 +540,7 @@ dependencies = [
 [[package]]
 name = "rp2040-hal-macros"
 version = "0.1.0"
-source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#5aa7ee7923a3fe28d6b64a3d83a74eb9c6ae28c8"
+source = "git+https://github.com/ithinuel/rp-hal?branch=impl-rtic-monotonic#9cfc543bee69fd6b9bf8da920d413a6295b7aba2"
 dependencies = [
  "proc-macro2",
  "quote",
