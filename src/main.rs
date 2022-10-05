@@ -51,6 +51,9 @@ mod app {
     // Sample period for Alarm2.
     const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(200_000);
 
+    // Control loop period
+    const CONTROL_LOOP_PERIOD_MS: u64 = 1000;
+
     // Length of the low pass averaging filter
     const FILTER_LENGTH: usize = 50;
 
@@ -224,7 +227,7 @@ mod app {
         alarm2.enable_interrupt();
 
         // Spawn the valve toggle task
-        valve_test_task::spawn_after(MicrosDurationU64::secs(5)).unwrap();
+        control_loop_task::spawn_after(MicrosDurationU64::secs(5)).unwrap();
         
         // Init and return the Shared data structure
         (Shared { 
@@ -352,29 +355,26 @@ mod app {
         });
     }
 
-    // ------- VALVE CONTROLLER TEST TASK: -----------.
+    // ------- CONTROL LOOP TASK: -----------.
     #[task(
         priority = 1, 
         shared = [main_chamber_valve, bladder_valve, measurement],
         local = [toggle: bool = true],
     )]
-    fn valve_test_task (mut c: valve_test_task::Context) { 
-        // if *c.local.toggle {
-        //     c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Pump));
-        //     c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Pump));
-        // } else {
-        //     c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Vent));
-        //     c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Vent));
-        // }
-        // *c.local.toggle = !*c.local.toggle;
+    fn control_loop_task (mut c: control_loop_task::Context) { 
 
+        // c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Pump));
+        // c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Pump));
+
+
+        // Print data for debugging
         c.shared.measurement.lock(|m: _| {
             info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}", 
             m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder);            
         });
 
 
-        valve_test_task::spawn_after(MicrosDurationU64::secs(1)).unwrap();
+        control_loop_task::spawn_after(MicrosDurationU64::millis(CONTROL_LOOP_PERIOD_MS)).unwrap();
     }
 
 }
