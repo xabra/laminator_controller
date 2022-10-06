@@ -39,7 +39,7 @@ mod app {
     use crate::valve_controller::{ValveController, ValveState};
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
-    use crate::signal_processing::MovingAverageFilter;
+    use crate::signal_processing::{MovingAverageFilter, PIDController};
     use crate::data_structs::Measurement;
 
 
@@ -52,7 +52,7 @@ mod app {
     const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(200_000);
 
     // Control loop period
-    const CONTROL_LOOP_PERIOD_MS: u64 = 1000;
+    const CONTROL_LOOP_TICK_MS: u64 = 1000;
 
     // Length of the low pass averaging filter
     const FILTER_LENGTH: usize = 50;
@@ -96,6 +96,7 @@ mod app {
         temp_fb_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_chamber_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_bladder_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
+        pid_controller: PIDController,
     }
 
     #[init]
@@ -143,14 +144,14 @@ mod app {
         let mut alarm2 = timer.alarm_2().unwrap();   
         
         // ----------- HEATER PWM CONTROLLER SETUP ------------
-        let mut pwm_ctr = PWM::new(pins.gpio15.into_push_pull_output());
-        pwm_ctr.set_duty_factor(0.5, TOP);
+        let mut pwm_ctr = PWM::new(pins.gpio15.into_push_pull_output(), TOP);
+        pwm_ctr.set_duty_factor(0.5);
 
-        let mut pwm_lr = PWM::new(pins.gpio13.into_push_pull_output());
-        pwm_lr.set_duty_factor(0.1, TOP);
+        let mut pwm_lr = PWM::new(pins.gpio13.into_push_pull_output(), TOP);
+        pwm_lr.set_duty_factor(0.1);
 
-        let mut pwm_fb = PWM::new(pins.gpio14.into_push_pull_output());
-        pwm_fb.set_duty_factor(0.9, TOP);
+        let mut pwm_fb = PWM::new(pins.gpio14.into_push_pull_output(), TOP);
+        pwm_fb.set_duty_factor(0.9);
 
         // ----------- VALVE CONTROLLER SETUP ------------
         // Create the valve controllers and initialize them. Need to check logic polarity
@@ -214,6 +215,10 @@ mod app {
             p_bladder: 0.0,
         };
 
+        // ----- PID Controller -----
+        let t_sample_sec: f32 = (CONTROL_LOOP_TICK_MS/1000) as f32;
+        let pid_controller = PIDController::new(t_sample_sec, 0.1, 0.0, 0.0, 0.0, 1.0, 0.0);
+
         // --------- DEBUG PIN
         let debug_pin = pins.gpio8.into_push_pull_output();
 
@@ -246,6 +251,7 @@ mod app {
             temp_fb_filter,
             p_chamber_filter,
             p_bladder_filter,
+            pid_controller,
             }, 
         init::Monotonics(Monotonic::new(timer, alarm0))
         )
@@ -358,23 +364,36 @@ mod app {
     // ------- CONTROL LOOP TASK: -----------.
     #[task(
         priority = 1, 
-        shared = [main_chamber_valve, bladder_valve, measurement],
-        local = [toggle: bool = true],
+        shared = [
+            main_chamber_valve, 
+            bladder_valve, 
+            measurement, 
+            pwm_ctr,],
+        local = [
+            toggle: bool = true, 
+            pid_controller,],
     )]
-    fn control_loop_task (mut c: control_loop_task::Context) { 
+    fn control_loop_task (c: control_loop_task::Context) { 
 
         // c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Pump));
         // c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Pump));
 
+        (c.shared.measurement, c.shared.pwm_ctr).lock(|m: _, pwm_ctr: _| {
+            // Get setpoint temperature
+            let temp_sp: f32 = 30.4;     
+            
+            // Compute PID loop output to drive pwms
+            let pwm_out: f32 =  c.local.pid_controller.update(m.temp_ctr, temp_sp);
+            pwm_ctr.set_duty_factor(pwm_out);
+           // pwm_lr, pwm_fb,
 
-        // Print data for debugging
-        c.shared.measurement.lock(|m: _| {
-            info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}", 
-            m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder);            
+
+            info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}, PWM_OUT: \t{:?}", 
+            m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder, pwm_out);            
         });
 
 
-        control_loop_task::spawn_after(MicrosDurationU64::millis(CONTROL_LOOP_PERIOD_MS)).unwrap();
+        control_loop_task::spawn_after(MicrosDurationU64::millis(CONTROL_LOOP_TICK_MS)).unwrap();
     }
 
 }

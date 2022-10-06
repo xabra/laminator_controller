@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 use num_traits::float::Float;
-
+use defmt::*;
 
 pub enum SignalProcError {
     ZeroLengthArray,
@@ -106,10 +106,13 @@ pub struct PIDController {
     t_sample_sec: f32,  // Sample time.  Could make this a duration....
     kp: f32,            // Proportional gain
     ki: f32,            // Integral gain
-    kd: f32,            // Differential gain
+    kd: f32,            // Differential gai    umin: f32, umax: f32,   // Output clampsn
     umin: f32, umax: f32,   // Output clamps
-    prev_e: f32, 
+    tau_sec: f32,       // Differentiator rolloff time constant (sec)
+    prev_e: f32,        // Previous error
+    prev_x: f32,        // Previous measurement
     i: f32,
+    d: f32,
 }
 
 impl PIDController{
@@ -118,21 +121,28 @@ impl PIDController{
         t_sample_sec: f32,          // Sample period in seconds
         kp: f32, ki: f32, kd: f32,  // Gains
         umin: f32, umax: f32,       // Output limits
+        tau_sec: f32,
     ) -> PIDController {
 
+
+        info!("PID CONTROLLER SETUP {:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?}", t_sample_sec, kp, ki, kd, umin, umax, tau_sec);
         PIDController {
             t_sample_sec, 
             kp, ki, kd,
             umin, umax,
+            tau_sec,
             prev_e: 0.0,
+            prev_x: 0.0,
             i: 0.0,
+            d: 0.0,
         }
     }
 
-    pub fn update(mut self, x: f32, x_sp: f32) -> f32 {
+    pub fn update(&mut self, x: f32, x_sp: f32) -> f32 {
 
         // Error signal
         let e = x_sp - x;
+        info!("PID INPUTS x:{:?}, xsp:{:?}, err:{:?}", x, x_sp, e);
 
         // Proportional term
         let p: f32 = self.kp * e;
@@ -141,18 +151,25 @@ impl PIDController{
         let i = self.i + self.ki/2.0*self.t_sample_sec*(e+self.prev_e);
 
         // Differential term
-        let d: f32 = 0.0;
+        let d: f32 = 
+        -(2.0 * self.kd * (x - self.prev_x)	// Use derivative of measurement, not error, to prevent differentiating the setpoint changes
+        + (2.0 * self.tau_sec - self.t_sample_sec) * self.d)
+        / (2.0 * self.tau_sec + self.t_sample_sec);
 
-        // Compute sum of terms to get output
+        // Sum the PID terms to get output
         let mut u = p + i + d;
+
+        info!("PID DATA p{:?}, i{:?}, d{:?}, u{:?}", p, i, d, u);
 
         // Check for saturation before clamping
         let is_sat = self.is_saturated(u);
 
         u = self.clamp_output(u);
 
+        info!("PID CLAMPED u_clamped{:?}, is_sat{:?} ", u, is_sat);
         // Cache previous values
         self.prev_e = e;
+        self.prev_x = x;
 
         // Anti-windup of integrator
         // If NOT saturated, update the stored value of the integrator
@@ -165,7 +182,7 @@ impl PIDController{
 
     // Output clamp function
     fn clamp_output(&self, u:f32) -> f32{
-        if u > self.umax {return self.umin;}
+        if u > self.umax {return self.umax;}
         if u < self.umin {return self.umin;}
         u    // return x
     }
