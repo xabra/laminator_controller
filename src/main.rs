@@ -36,7 +36,7 @@ mod app {
     use rp_pico::hal::gpio::Pin;
     use rp_pico::hal::gpio::FunctionI2C;
 
-    use crate::pwm_controller::PWM;
+    use crate::{pwm_controller::PWM, thermocouple_controller::TCError};
     use crate::valve_controller::{ValveController, ValveState};
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
@@ -62,6 +62,9 @@ mod app {
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
     type MyMono = Monotonic<Alarm0>;
 
+    // ----------------------------------------------------------------
+    // -----  SHARED DATA
+    // ----------------------------------------------------------------
     #[shared]
     struct Shared {
         // Heater PWM stuff
@@ -90,6 +93,9 @@ mod app {
         measurement: Measurement,
     }
 
+    // ----------------------------------------------------------------
+    // -----  LOCAL DATA
+    // ----------------------------------------------------------------
     #[local]
     struct Local {
         temp_ctr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
@@ -215,6 +221,9 @@ mod app {
             temp_ctr: 0.0,
             temp_lr: 0.0,
             temp_fb: 0.0,   
+            temp_err_ctr: TCError::NoTCError,
+            temp_err_lr: TCError::NoTCError,
+            temp_err_fb: TCError::NoTCError,
             p_chamber: 0.0,
             p_bladder: 0.0,
         };
@@ -329,11 +338,26 @@ mod app {
         let mut temp_ctr:f32 = 0.0;
         let mut temp_lr:f32 = 0.0;
         let mut temp_fb:f32 = 0.0;
+        let mut temp_err_ctr: TCError = TCError::NoTCError;
+        let mut temp_err_lr: TCError = TCError::NoTCError;
+        let mut temp_err_fb: TCError = TCError::NoTCError;
+
         c.shared.tc_controller.lock(|tcc: _| {
-            // TODO : Handle these errors !
-            temp_ctr = tcc.acquire(TCChannel::Center).unwrap();
-            temp_lr = tcc.acquire(TCChannel::LeftRight).unwrap();
-            temp_fb = tcc.acquire(TCChannel::FrontBack).unwrap();
+
+            match tcc.acquire(TCChannel::Center) {
+                Err(e) => {temp_err_ctr = e;},
+                Ok(t) => { temp_ctr = t;},
+            }
+
+            match tcc.acquire(TCChannel::LeftRight) {
+                Err(e) => {temp_err_lr = e;},
+                Ok(t) => { temp_lr = t;},
+            }
+
+            match tcc.acquire(TCChannel::FrontBack) {
+                Err(e) => {temp_err_fb = e;},
+                Ok(t) => {temp_fb = t;},
+            };
 
         });
         
@@ -358,6 +382,9 @@ mod app {
             m.temp_ctr = temp_ctr_filtered;
             m.temp_lr = temp_lr_filtered;
             m.temp_fb = temp_fb_filtered;
+            m.temp_err_ctr = temp_err_ctr;
+            m.temp_err_lr = temp_err_lr;
+            m.temp_err_fb = temp_err_fb;
             m.p_chamber = p_chamber_filtered;
             m.p_bladder = p_bladder_filtered;
         });
@@ -409,16 +436,35 @@ mod app {
             pwm_fb.set_duty_factor(pwm_out*0.5);
 
 
-            info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}, PWM_OUT: \t{:?}", 
-            m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder, pwm_out);            
+            info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}, PWM_DF: \t{:?} , AVG TEMP: \t{:?}", 
+            m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder, pwm_out, temp_avg);            
+
         });
 
 
         control_loop_task::spawn_after(MicrosDurationU64::millis(CONTROL_LOOP_TICK_MS)).unwrap();
     }
 
+    // Computes an average temp using only the good (no error) TCs
+    // TODO: should return an error is good_tc_count == 0
     fn average_temp(m: &mut Measurement) -> f32 {
-        (m.temp_ctr + m.temp_lr + m.temp_fb)/3.0
+        let mut good_tc_count:u32 = 0;
+        let mut temp_sum: f32 = 0.0;
+
+        if m.temp_err_ctr == TCError::NoTCError {
+            temp_sum += m.temp_ctr;
+            good_tc_count += 1;
+        }
+        if m.temp_err_lr == TCError::NoTCError {
+            temp_sum += m.temp_lr;
+            good_tc_count += 1;
+        }
+        if m.temp_err_fb == TCError::NoTCError {
+            temp_sum += m.temp_fb;
+            good_tc_count += 1;
+        }
+
+        temp_sum/(good_tc_count as f32)
     }
 
 }
