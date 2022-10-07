@@ -20,6 +20,7 @@ This is RTIC version
 mod app {
 
     
+
     use embedded_hal::digital::v2::OutputPin;
     use fugit::{MicrosDurationU32, MicrosDurationU64 ,RateExtU32};
     use defmt::*;
@@ -99,6 +100,9 @@ mod app {
         pid_controller: PIDController,
     }
 
+    // ----------------------------------------------------------------
+    // -----  APP INIT
+    // ----------------------------------------------------------------
     #[init]
     fn init(c: init::Context) -> (Shared, Local, init::Monotonics) {
         // --- Init boilerplate ---
@@ -257,7 +261,9 @@ mod app {
         )
     }
 
-    // -- HEATER PWM TASK: Hardware task coupled to Alarm1/TIMER_IRQ_1.
+    // ----------------------------------------------------------------
+    // -- HEATER PWM TASK
+    // ----------------------------------------------------------------
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_1,  
@@ -299,7 +305,9 @@ mod app {
 
     }
 
-    // -- SIGNAL PROCESSING TASK: Hardware task coupled to Alarm2/TIMER_IRQ_2.
+     // ----------------------------------------------------------------
+    // -- DATA ACQUISITION & SIGNAL PROCESSING TASK
+     // ----------------------------------------------------------------
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_2,  
@@ -317,6 +325,7 @@ mod app {
 
         c.shared.debug_pin.lock(|l| l.set_high().unwrap());
 
+        // Acquire temperature measurements
         let mut temp_ctr:f32 = 0.0;
         let mut temp_lr:f32 = 0.0;
         let mut temp_fb:f32 = 0.0;
@@ -328,6 +337,7 @@ mod app {
 
         });
         
+        // Acquire pressure measurements
         let mut p_chamber:f32 = 0.0;
         let mut p_bladder:f32 = 0.0;
         (c.shared.pressure_sensor_controller).lock(|psc: _| {
@@ -343,7 +353,7 @@ mod app {
         let p_chamber_filtered = c.local.p_chamber_filter.push(p_chamber);
         let p_bladder_filtered = c.local.p_bladder_filter.push(p_bladder);
 
-        // Lock shared and Write the measurements
+        // Lock shared.measurement and write data to shared measurements data structure
         (c.shared.measurement).lock(|m: _| {
             m.temp_ctr = temp_ctr_filtered;
             m.temp_lr = temp_lr_filtered;
@@ -354,6 +364,8 @@ mod app {
 
         c.shared.debug_pin.lock(|l| l.set_low().unwrap());
 
+
+        // Schedule next iteration
         let mut alarm = c.shared.alarm2;
         (alarm).lock(|a|{
             a.clear_interrupt();
@@ -361,14 +373,17 @@ mod app {
         });
     }
 
-    // ------- CONTROL LOOP TASK: -----------.
+    // ----------------------------------------------------------------
+    // ------- CONTROL LOOP TASK 
+    // ----------------------------------------------------------------
     #[task(
         priority = 1, 
         shared = [
             main_chamber_valve, 
             bladder_valve, 
             measurement, 
-            pwm_ctr,],
+            pwm_ctr, pwm_lr, pwm_fb,
+            ],
         local = [
             toggle: bool = true, 
             pid_controller,],
@@ -378,14 +393,20 @@ mod app {
         // c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Pump));
         // c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Pump));
 
-        (c.shared.measurement, c.shared.pwm_ctr).lock(|m: _, pwm_ctr: _| {
+        (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _| {
             // Get setpoint temperature
             let temp_sp: f32 = 30.4;     
             
-            // Compute PID loop output to drive pwms
-            let pwm_out: f32 =  c.local.pid_controller.update(m.temp_ctr, temp_sp);
+            // Compute average measured temperature
+            let temp_avg: f32 = average_temp(m); 
+
+            // Get overall duty_factor from PID controller
+            let pwm_out: f32 =  c.local.pid_controller.update(temp_avg, temp_sp);
+
+            // Set the duty_factors for the 3 sets of heaters
             pwm_ctr.set_duty_factor(pwm_out);
-           // pwm_lr, pwm_fb,
+            pwm_lr.set_duty_factor(pwm_out*0.9);
+            pwm_fb.set_duty_factor(pwm_out*0.5);
 
 
             info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}, PWM_OUT: \t{:?}", 
@@ -394,6 +415,10 @@ mod app {
 
 
         control_loop_task::spawn_after(MicrosDurationU64::millis(CONTROL_LOOP_TICK_MS)).unwrap();
+    }
+
+    fn average_temp(m: &mut Measurement) -> f32 {
+        (m.temp_ctr + m.temp_lr + m.temp_fb)/3.0
     }
 
 }
