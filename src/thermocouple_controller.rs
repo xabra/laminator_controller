@@ -34,11 +34,12 @@ pub enum TCChannel {
     LeftRight,
     FrontBack,
 }
-#[derive(Debug, Copy, Clone, Format)]
+#[derive(Debug, Copy, Clone, Format, PartialEq)]
 pub enum TCError {
     TempSensorShortToVCC,
     TempSensorShortToGND,
     TempSensorOpenCircuit,
+    NoTCError,
 }
 #[derive(Debug, Copy, Clone, Format)]
 pub struct Temperatures {
