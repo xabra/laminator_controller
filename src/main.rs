@@ -7,6 +7,7 @@ pub mod thermocouple_controller;
 pub mod pressure_sensor_controller;
 pub mod signal_processing;
 pub mod data_structs;
+pub mod time_util;
 
 use panic_halt as _;
 use defmt_rtt as _;
@@ -19,11 +20,10 @@ This is RTIC version
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true, dispatchers = [ADC_IRQ_FIFO, UART1_IRQ, DMA_IRQ_1])]    
 mod app {
 
-    
-
     use embedded_hal::digital::v2::OutputPin;
     use fugit::{MicrosDurationU32, MicrosDurationU64 ,RateExtU32};
     use defmt::*;
+    use hal::rtc::{RealTimeClock, DateTime, DayOfWeek};
     use rp_pico::{
         hal::{self, clocks::init_clocks_and_plls, timer::{monotonic::Monotonic, Alarm, Alarm0}, watchdog::Watchdog, Sio},
         XOSC_CRYSTAL_FREQ,
@@ -60,7 +60,7 @@ mod app {
 
     // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
-    type MyMono = Monotonic<Alarm0>;
+    type MonotonicType = Monotonic<Alarm0>;
 
     // ----------------------------------------------------------------
     // -----  SHARED DATA
@@ -104,6 +104,8 @@ mod app {
         p_chamber_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_bladder_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         pid_controller: PIDController,
+        rtc: RealTimeClock,
+        start_time: u32,
     }
 
     // ----------------------------------------------------------------
@@ -151,7 +153,27 @@ mod app {
         let mut alarm1 = timer.alarm_1().unwrap();   
 
         // Create alarm2. When alarm1 triggers, it generates interrupt TIMER_IRQ_2
-        let mut alarm2 = timer.alarm_2().unwrap();   
+        let mut alarm2 = timer.alarm_2().unwrap();  
+
+        let initial_date_time = DateTime {
+            year: 2022,
+            month: 10,
+            day: 7,
+            day_of_week: DayOfWeek::Friday,
+            hour: 23,
+            minute: 30,
+            second: 0,
+        };
+        
+        info!("init time:   {:?},  {:?},  {:?},  {:?}, ",  initial_date_time.day, initial_date_time.hour, initial_date_time.minute, initial_date_time.second);
+        let rtc =  RealTimeClock::new(c.device.RTC, clocks.rtc_clock , &mut resets, initial_date_time).expect("ERROR IN NEW RTC");
+        info!("Is running {:?}", rtc.is_running());
+        let now = rtc.now().expect("Error in RTC now");
+        info!("now:   {:?},  {:?},  {:?},  {:?}, ",  now.day, now.hour, now.minute, now.second);
+
+
+        let start_time = crate::time_util::date_time_to_seconds(now);
+        //info!("start time:   {:?}  ", start_time);
         
         // ----------- HEATER PWM CONTROLLER SETUP ------------
         let mut pwm_ctr = PWM::new(pins.gpio15.into_push_pull_output(), TOP);
@@ -246,6 +268,8 @@ mod app {
 
         // Spawn the valve toggle task
         control_loop_task::spawn_after(MicrosDurationU64::secs(5)).unwrap();
+
+        let monotonic: MonotonicType = Monotonic::new(timer, alarm0);
         
         // Init and return the Shared data structure
         (Shared { 
@@ -257,6 +281,7 @@ mod app {
             tc_controller,
             pressure_sensor_controller,
             measurement,
+            //mono,
             }, 
         Local {
             temp_ctr_filter,
@@ -265,8 +290,10 @@ mod app {
             p_chamber_filter,
             p_bladder_filter,
             pid_controller,
+            rtc,
+            start_time,
             }, 
-        init::Monotonics(Monotonic::new(timer, alarm0))
+        init::Monotonics(monotonic)
         )
     }
 
@@ -413,7 +440,10 @@ mod app {
             ],
         local = [
             toggle: bool = true, 
-            pid_controller,],
+            pid_controller,
+            rtc,
+            start_time,
+            ],
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
 
@@ -435,9 +465,11 @@ mod app {
             pwm_lr.set_duty_factor(pwm_out*0.9);
             pwm_fb.set_duty_factor(pwm_out*0.5);
 
+            let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
+            let elapsed = now - *c.local.start_time;
 
-            info!("DATA:  {:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}, PWM_DF: \t{:?} , AVG TEMP: \t{:?}", 
-            m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder, pwm_out, temp_avg);            
+            info!("time: {:?}, \t{:?}, {:?}, \t{:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}, PWM_DF: \t{:?} , AVG TEMP: \t{:?}", 
+            now, *c.local.start_time, elapsed, m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder, pwm_out, temp_avg);            
 
         });
 
