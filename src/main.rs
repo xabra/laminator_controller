@@ -165,14 +165,12 @@ mod app {
             second: 0,
         };
         
-        info!("init time:   {:?},  {:?},  {:?},  {:?}, ",  initial_date_time.day, initial_date_time.hour, initial_date_time.minute, initial_date_time.second);
+        //info!("init time:   {:?},  {:?},  {:?},  {:?}, ",  initial_date_time.day, initial_date_time.hour, initial_date_time.minute, initial_date_time.second);
         let rtc =  RealTimeClock::new(c.device.RTC, clocks.rtc_clock , &mut resets, initial_date_time).expect("ERROR IN NEW RTC");
-        info!("Is running {:?}", rtc.is_running());
-        let now = rtc.now().expect("Error in RTC now");
-        info!("now:   {:?},  {:?},  {:?},  {:?}, ",  now.day, now.hour, now.minute, now.second);
+       // info!("Is running {:?}", rtc.is_running());
+        //info!("now:   {:?},  {:?},  {:?},  {:?}, ",  now.day, now.hour, now.minute, now.second);
 
 
-        let start_time = crate::time_util::date_time_to_seconds(now);
         //info!("start time:   {:?}  ", start_time);
         
         // ----------- HEATER PWM CONTROLLER SETUP ------------
@@ -265,6 +263,10 @@ mod app {
         // Schedule the high speed data sampling HW interrupt task.
         let _ = alarm2.schedule(SAMPLE_TICK_US);
         alarm2.enable_interrupt();
+
+        // Initialize the elapsed time counter (RTC)
+        let now = rtc.now().expect("Error in RTC now");
+        let start_time = crate::time_util::date_time_to_seconds(now);
 
         // Spawn the valve toggle task
         control_loop_task::spawn_after(MicrosDurationU64::secs(5)).unwrap();
@@ -468,8 +470,8 @@ mod app {
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
             let elapsed = now - *c.local.start_time;
 
-            info!("time: {:?}, \t{:?}, {:?}, \t{:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}, PWM_DF: \t{:?} , AVG TEMP: \t{:?}", 
-            now, *c.local.start_time, elapsed, m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder, pwm_out, temp_avg);            
+            info!("Elapsed time: {:?}, \t{:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}, PWM_DF: \t{:?} , AVG TEMP: \t{:?}", 
+            elapsed, m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder, pwm_out, temp_avg);            
 
         });
 
