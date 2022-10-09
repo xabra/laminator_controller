@@ -8,6 +8,7 @@ pub mod pressure_sensor_controller;
 pub mod signal_processing;
 pub mod data_structs;
 pub mod time_util;
+pub mod recipe_manager;
 
 use panic_halt as _;
 use defmt_rtt as _;
@@ -42,6 +43,7 @@ mod app {
     use crate::pressure_sensor_controller::PressureSensorController;
     use crate::signal_processing::{MovingAverageFilter, PIDController};
     use crate::data_structs::Measurement;
+    use crate::recipe_manager::{SetPoint, VacuumSetpoint::{Vented, Evacuated}, Recipe};
 
 
     // PWM cycle period.
@@ -165,13 +167,19 @@ mod app {
             second: 0,
         };
         
-        //info!("init time:   {:?},  {:?},  {:?},  {:?}, ",  initial_date_time.day, initial_date_time.hour, initial_date_time.minute, initial_date_time.second);
         let rtc =  RealTimeClock::new(c.device.RTC, clocks.rtc_clock , &mut resets, initial_date_time).expect("ERROR IN NEW RTC");
-       // info!("Is running {:?}", rtc.is_running());
-        //info!("now:   {:?},  {:?},  {:?},  {:?}, ",  now.day, now.hour, now.minute, now.second);
 
+        // --------------- CREATE RECIPE --------------
+        const recipe_array:[SetPoint; 4] = [
+        SetPoint{t_sec:10, sp_temp: 25.0, sp_chbr_pressure: Vented, sp_bladder_pressure: Vented},
+        SetPoint{t_sec:40, sp_temp: 45.0, sp_chbr_pressure: Vented, sp_bladder_pressure: Evacuated},
+        SetPoint{t_sec:70, sp_temp: 95.0, sp_chbr_pressure: Vented, sp_bladder_pressure: Vented},
+        SetPoint{t_sec:80, sp_temp: 2.0, sp_chbr_pressure: Vented, sp_bladder_pressure: Vented},
+        ];
 
-        //info!("start time:   {:?}  ", start_time);
+        let recipe = Recipe::new(&recipe_array);
+        recipe.list_setpoints();
+
         
         // ----------- HEATER PWM CONTROLLER SETUP ------------
         let mut pwm_ctr = PWM::new(pins.gpio15.into_push_pull_output(), TOP);

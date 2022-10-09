@@ -13,22 +13,9 @@ pub struct Measurement {
     pub p_chamber: f32,
     pub p_bladder: f32,
 }
-pub enum VacuumSetpoint {
-    Evacuated,
-    Vented,
-}
-
 pub enum VacuumState {
     Evacuated,
     Vented,
     Pumping,
     Venting,
 }
-
-pub struct SetPoint {
-    pub t_sec: u32,       // Elapsed time
-    pub sp_temp: f32,     // setpoint temp
-    pub sp_chbr_pressure: VacuumSetpoint,
-    pub sp_bladder_pressure: VacuumSetpoint,
-}
-
