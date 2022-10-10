@@ -60,6 +60,8 @@ mod app {
     // Length of the low pass averaging filter
     const FILTER_LENGTH: usize = 50;
 
+    const N_SETPOINTS: usize = 4;
+
     // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
     type MonotonicType = Monotonic<Alarm0>;
@@ -81,10 +83,6 @@ mod app {
         pwm_lr: PWM<Gpio13>,
         pwm_fb: PWM<Gpio14>,
 
-        // Valves
-        main_chamber_valve: ValveController<Gpio12>,
-        bladder_valve: ValveController<Gpio11>,
-
         // Thermocouple
         tc_controller: ThermocoupleController<Gpio17, Gpio19, Gpio20, SPI0>,
 
@@ -105,9 +103,13 @@ mod app {
         temp_fb_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_chamber_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_bladder_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
+        // Valves
+        main_chamber_valve: ValveController<Gpio12>,
+        bladder_valve: ValveController<Gpio11>,
         pid_controller: PIDController,
         rtc: RealTimeClock,
         start_time: u32,
+        recipe: Recipe::<N_SETPOINTS>,
     }
 
     // ----------------------------------------------------------------
@@ -170,14 +172,15 @@ mod app {
         let rtc =  RealTimeClock::new(c.device.RTC, clocks.rtc_clock , &mut resets, initial_date_time).expect("ERROR IN NEW RTC");
 
         // --------------- CREATE RECIPE --------------
-        const recipe_array:[SetPoint; 4] = [
-        SetPoint{t_sec:10, sp_temp: 25.0, sp_chbr_pressure: Vented, sp_bladder_pressure: Vented},
-        SetPoint{t_sec:40, sp_temp: 45.0, sp_chbr_pressure: Vented, sp_bladder_pressure: Evacuated},
-        SetPoint{t_sec:70, sp_temp: 95.0, sp_chbr_pressure: Vented, sp_bladder_pressure: Vented},
-        SetPoint{t_sec:80, sp_temp: 2.0, sp_chbr_pressure: Vented, sp_bladder_pressure: Vented},
+        
+        static RECIPE_ARRAY:[SetPoint; N_SETPOINTS] = [
+        SetPoint{t:0, temp: 25.0, p_chamber: Vented, p_bladder: Vented},
+        SetPoint{t:40, temp: 45.0, p_chamber: Vented, p_bladder: Evacuated},
+        SetPoint{t:70, temp: 95.0, p_chamber: Vented, p_bladder: Vented},
+        SetPoint{t:80, temp: 2.0, p_chamber: Vented, p_bladder: Vented},
         ];
 
-        let recipe = Recipe::new(&recipe_array);
+        let recipe = Recipe::<N_SETPOINTS>::new(RECIPE_ARRAY);
         recipe.list_setpoints();
 
         
@@ -287,7 +290,6 @@ mod app {
             alarm2,
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
-            main_chamber_valve, bladder_valve,
             tc_controller,
             pressure_sensor_controller,
             measurement,
@@ -299,9 +301,13 @@ mod app {
             temp_fb_filter,
             p_chamber_filter,
             p_bladder_filter,
+            // Valves
+            main_chamber_valve,
+            bladder_valve,
             pid_controller,
             rtc,
             start_time,
+            recipe,
             }, 
         init::Monotonics(monotonic)
         )
@@ -443,43 +449,47 @@ mod app {
     #[task(
         priority = 1, 
         shared = [
-            main_chamber_valve, 
-            bladder_valve, 
             measurement, 
             pwm_ctr, pwm_lr, pwm_fb,
             ],
         local = [
             toggle: bool = true, 
+            main_chamber_valve, 
+            bladder_valve, 
             pid_controller,
             rtc,
             start_time,
+            recipe,
             ],
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
 
-        // c.shared.main_chamber_valve.lock(|l| l.set_state(ValveState::Pump));
-        // c.shared.bladder_valve.lock(|l| l.set_state(ValveState::Pump));
+        c.local.main_chamber_valve.set_state(ValveState::Pump);
+        c.local.bladder_valve.set_state(ValveState::Pump);
 
         (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _| {
-            // Get setpoint temperature
-            let temp_sp: f32 = 30.4;     
+            
+            // Get elapsed time
+            let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
+            let elapsed = now - *c.local.start_time;
+            
+            // Get current temperature setpoint from the recipe.  Interpolate setpoint temp
+            let (sp, segment) = c.local.recipe.get_current_setpoint(elapsed);  
             
             // Compute average measured temperature
             let temp_avg: f32 = average_temp(m); 
 
             // Get overall duty_factor from PID controller
-            let pwm_out: f32 =  c.local.pid_controller.update(temp_avg, temp_sp);
+            let pwm_out: f32 =  c.local.pid_controller.update(temp_avg, sp.temp);
 
             // Set the duty_factors for the 3 sets of heaters
             pwm_ctr.set_duty_factor(pwm_out);
             pwm_lr.set_duty_factor(pwm_out*0.9);
-            pwm_fb.set_duty_factor(pwm_out*0.5);
+            pwm_fb.set_duty_factor(pwm_out*0.95);    
 
-            let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
-            let elapsed = now - *c.local.start_time;
 
-            info!("Elapsed time: {:?}, \t{:?}, \t{:?}, \t{:?}, \t{:?},  \t{:?}, PWM_DF: \t{:?} , AVG TEMP: \t{:?}", 
-            elapsed, m.temp_ctr, m.temp_lr, m.temp_fb, m.p_chamber, m.p_bladder, pwm_out, temp_avg);            
+            info!("TIME: {:?}, \tSEGMENT: {:?}, \tSP_TEMP: {:?}, \tTEMPS:( {:?},\t{:?},\t{:?},\t{:?} ),\tPRESSURES: ( {:?}, {:?} ), \tDF:{:?}", 
+            elapsed, segment, sp.temp, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, pwm_out);            
 
         });
 

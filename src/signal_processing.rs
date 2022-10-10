@@ -125,7 +125,7 @@ impl PIDController{
     ) -> PIDController {
 
 
-        info!("PID CONTROLLER SETUP {:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?}", t_sample_sec, kp, ki, kd, umin, umax, tau_sec);
+        //info!("PID CONTROLLER SETUP {:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?}", t_sample_sec, kp, ki, kd, umin, umax, tau_sec);
         PIDController {
             t_sample_sec, 
             kp, ki, kd,
@@ -142,7 +142,7 @@ impl PIDController{
 
         // Error signal
         let e = x_sp - x;
-        info!("PID INPUTS x:{:?}, xsp:{:?}, err:{:?}", x, x_sp, e);
+        //info!("PID INPUTS x:{:?}, xsp:{:?}, err:{:?}", x, x_sp, e);
 
         // Proportional term
         let p: f32 = self.kp * e;
@@ -159,14 +159,14 @@ impl PIDController{
         // Sum the PID terms to get output
         let mut u = p + i + d;
 
-        info!("PID DATA p{:?}, i{:?}, d{:?}, u{:?}", p, i, d, u);
+       // info!("PID DATA p{:?}, i{:?}, d{:?}, u{:?}", p, i, d, u);
 
         // Check for saturation before clamping
         let is_sat = self.is_saturated(u);
 
         u = self.clamp_output(u);
 
-        info!("PID CLAMPED u_clamped{:?}, is_sat{:?} ", u, is_sat);
+       // info!("PID CLAMPED u_clamped{:?}, is_sat{:?} ", u, is_sat);
         // Cache previous values
         self.prev_e = e;
         self.prev_x = x;
