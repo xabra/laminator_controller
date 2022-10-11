@@ -13,9 +13,3 @@ pub struct Measurement {
     pub p_chamber: f32,
     pub p_bladder: f32,
 }
-pub enum VacuumState {
-    Evacuated,
-    Vented,
-    Pumping,
-    Venting,
-}
