@@ -37,7 +37,7 @@ mod app {
     use rp_pico::hal::gpio::Pin;
     use rp_pico::hal::gpio::FunctionI2C;
 
-    use crate::{pwm_controller::PWM, thermocouple_controller::TCError};
+    use crate::{pwm_controller::PWM, thermocouple_controller::TCError, valve_controller::PressureState};
     use crate::valve_controller::{ValveController, ValveState};
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
@@ -60,7 +60,10 @@ mod app {
     // Length of the low pass averaging filter
     const FILTER_LENGTH: usize = 50;
 
-    const N_SETPOINTS: usize = 4;
+    const N_RECIPE_SETPOINTS: usize = 4;
+
+    const P_ATM_THRESHOLD: f32 = -200.0;            // Pa.  Above this pressure is considered atmosphere
+    const P_VACUUM_THRESHOLD: f32 = -100_000.0;     // Pa  Below this pressure is considered vacuum
 
     // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
@@ -109,7 +112,7 @@ mod app {
         pid_controller: PIDController,
         rtc: RealTimeClock,
         start_time: u32,
-        recipe: Recipe::<N_SETPOINTS>,
+        recipe: Recipe::<N_RECIPE_SETPOINTS>,
     }
 
     // ----------------------------------------------------------------
@@ -173,14 +176,14 @@ mod app {
 
         // --------------- CREATE RECIPE --------------
         
-        static RECIPE_ARRAY:[SetPoint; N_SETPOINTS] = [
+        static RECIPE_ARRAY:[SetPoint; N_RECIPE_SETPOINTS] = [
         SetPoint{t:0, temp: 25.0, p_chamber: Vented, p_bladder: Vented},
         SetPoint{t:40, temp: 45.0, p_chamber: Vented, p_bladder: Evacuated},
         SetPoint{t:70, temp: 95.0, p_chamber: Vented, p_bladder: Vented},
         SetPoint{t:80, temp: 2.0, p_chamber: Vented, p_bladder: Vented},
         ];
 
-        let recipe = Recipe::<N_SETPOINTS>::new(RECIPE_ARRAY);
+        let recipe = Recipe::<N_RECIPE_SETPOINTS>::new(RECIPE_ARRAY);
         recipe.list_setpoints();
 
         
@@ -196,10 +199,10 @@ mod app {
 
         // ----------- VALVE CONTROLLER SETUP ------------
         // Create the valve controllers and initialize them. Need to check logic polarity
-        let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output());
-        main_chamber_valve.set_state(ValveState::Pump);
-        let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());
-        bladder_valve.set_state(ValveState::Pump);
+        let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output(), P_ATM_THRESHOLD, P_VACUUM_THRESHOLD);
+        main_chamber_valve.set_valve_state(ValveState::Pump);
+        let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output(), P_ATM_THRESHOLD, P_VACUUM_THRESHOLD);
+        bladder_valve.set_valve_state(ValveState::Pump);
 
         // ------------- THERMOCOUPLE CONTROLLER ---------
         // Chip select pins
@@ -464,8 +467,8 @@ mod app {
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
 
-        c.local.main_chamber_valve.set_state(ValveState::Pump);
-        c.local.bladder_valve.set_state(ValveState::Pump);
+        c.local.main_chamber_valve.set_valve_state(ValveState::Pump);
+        c.local.bladder_valve.set_valve_state(ValveState::Pump);
 
         (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _| {
             
@@ -473,11 +476,15 @@ mod app {
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
             let elapsed = now - *c.local.start_time;
             
-            // Get current temperature setpoint from the recipe.  Interpolate setpoint temp
+            // Get current setpoint from the recipe.  Interpolate setpoint temp
             let (sp, segment) = c.local.recipe.get_current_setpoint(elapsed);  
             
             // Compute average measured temperature
             let temp_avg: f32 = average_temp(m); 
+
+            // Determine chamber pressure states
+            let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
+            let ps_bladder: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
 
             // Get overall duty_factor from PID controller
             let pwm_out: f32 =  c.local.pid_controller.update(temp_avg, sp.temp);
@@ -488,8 +495,8 @@ mod app {
             pwm_fb.set_duty_factor(pwm_out*0.95);    
 
 
-            info!("TIME: {:?}, \tSEGMENT: {:?}, \tSP_TEMP: {:?}, \tTEMPS:( {:?},\t{:?},\t{:?},\t{:?} ),\tPRESSURES: ( {:?}, {:?} ), \tDF:{:?}", 
-            elapsed, segment, sp.temp, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, pwm_out);            
+            info!("TIME: {:?}, \tSEGMENT: {:?}, \tSP_TEMP: {:?}, \tTEMPS:( {:?},\t{:?},\t{:?},\t{:?} ),\tPRESSURES: ( {:?}, {:?} ), PRESSURE_STATES( {:?}, {:?} ) \tDF:{:?}", 
+            elapsed, segment, sp.temp, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, ps_chbr, ps_bladder, pwm_out);            
 
         });
 
