@@ -177,10 +177,10 @@ mod app {
         // --------------- CREATE RECIPE --------------
         
         static RECIPE_ARRAY:[SetPoint; N_RECIPE_SETPOINTS] = [
-        SetPoint{t:0, temp: 25.0, p_chamber: Vented, p_bladder: Vented},
-        SetPoint{t:40, temp: 45.0, p_chamber: Vented, p_bladder: Evacuated},
-        SetPoint{t:70, temp: 95.0, p_chamber: Vented, p_bladder: Vented},
-        SetPoint{t:80, temp: 2.0, p_chamber: Vented, p_bladder: Vented},
+        SetPoint{t:0, temp: 10.0, p_chamber: Evacuated, p_bladder: Vented},
+        SetPoint{t:40, temp: 50.0, p_chamber: Vented, p_bladder: Evacuated},
+        SetPoint{t:80, temp: 50.0, p_chamber: Evacuated, p_bladder: Vented},
+        SetPoint{t:120, temp: 10.0, p_chamber: Vented, p_bladder: Evacuated},
         ];
 
         let recipe = Recipe::<N_RECIPE_SETPOINTS>::new(RECIPE_ARRAY);
@@ -378,6 +378,7 @@ mod app {
     )]
     fn sample_period_task (mut c: sample_period_task::Context) { 
 
+        // Debug pin for checking timing...
         c.shared.debug_pin.lock(|l| l.set_high().unwrap());
 
         // Acquire temperature measurements
@@ -435,6 +436,7 @@ mod app {
             m.p_bladder = p_bladder_filtered;
         });
 
+        // Debug pin for checking timing...
         c.shared.debug_pin.lock(|l| l.set_low().unwrap());
 
 
@@ -467,9 +469,6 @@ mod app {
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
 
-        c.local.main_chamber_valve.set_valve_state(ValveState::Pump);
-        c.local.bladder_valve.set_valve_state(ValveState::Pump);
-
         (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _| {
             
             // Get elapsed time
@@ -482,9 +481,20 @@ mod app {
             // Compute average measured temperature
             let temp_avg: f32 = average_temp(m); 
 
-            // Determine chamber pressure states
+            // Determine chamber pressure states (informational only)
             let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
             let ps_bladder: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
+
+            // Set the valves per the setpoints for each chamber
+            match sp.p_chamber {
+                Evacuated => {c.local.main_chamber_valve.set_valve_state(ValveState::Pump);}
+                Vented => {c.local.main_chamber_valve.set_valve_state(ValveState::Vent);}
+            }
+
+            match sp.p_bladder {
+                Evacuated => {c.local.bladder_valve.set_valve_state(ValveState::Pump);}
+                Vented => {c.local.bladder_valve.set_valve_state(ValveState::Vent);}
+            }
 
             // Get overall duty_factor from PID controller
             let pwm_out: f32 =  c.local.pid_controller.update(temp_avg, sp.temp);
@@ -495,8 +505,8 @@ mod app {
             pwm_fb.set_duty_factor(pwm_out*0.95);    
 
 
-            info!("TIME: {:?}, \tSEGMENT: {:?}, \tSP_TEMP: {:?}, \tTEMPS:( {:?},\t{:?},\t{:?},\t{:?} ),\tPRESSURES: ( {:?}, {:?} ), PRESSURE_STATES( {:?}, {:?} ) \tDF:{:?}", 
-            elapsed, segment, sp.temp, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, ps_chbr, ps_bladder, pwm_out);            
+            info!("TIME: {:?}, \tSEG: {:?}, \tSP: ( {:?} C, {:?}, {:?} ) \tT:( {:?},\t{:?},\t{:?},\t{:?} ),\tP: ( {:?}, {:?} ), PSTATE( {:?}, {:?} ) \tDF:{:?}", 
+            elapsed, segment, sp.temp, sp.p_chamber, sp.p_bladder, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, ps_chbr, ps_bladder, pwm_out);            
 
         });
 
