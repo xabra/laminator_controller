@@ -29,13 +29,16 @@ mod app {
         hal::{self, clocks::init_clocks_and_plls, timer::{monotonic::Monotonic, Alarm, Alarm0}, watchdog::Watchdog, Sio},
         XOSC_CRYSTAL_FREQ,
     };
-    use rp_pico::hal::gpio::pin::bank0::{Gpio4, Gpio5, Gpio6, Gpio7, Gpio8, Gpio11, Gpio12, Gpio13, Gpio14, Gpio15, Gpio17, Gpio19, Gpio20};
+    use rp_pico::hal::gpio::pin::bank0::{Gpio0, Gpio1, Gpio4, Gpio5, Gpio6, Gpio7, Gpio8, Gpio11, Gpio12, Gpio13, Gpio14, Gpio15, Gpio17, Gpio19, Gpio20};
     use rp_pico::hal::spi;
     use rp_pico::hal::pac::SPI0;
     use rp_pico::hal::pac::I2C0;
     use rp_pico::hal::I2C;
+    use rp_pico::hal::Clock;
     use rp_pico::hal::gpio::Pin;
     use rp_pico::hal::gpio::FunctionI2C;
+    use hal::uart::{DataBits, StopBits, UartConfig};
+    use serde_json_core;
 
     use crate::{pwm_controller::PWM, thermocouple_controller::TCError, valve_controller::PressureState};
     use crate::valve_controller::{ValveController, ValveState};
@@ -68,6 +71,15 @@ mod app {
     // Alarm0 which generates interrupt request TIMER_IRQ_0 is used by monotonic
     #[monotonic(binds = TIMER_IRQ_0, default = true)]
     type MonotonicType = Monotonic<Alarm0>;
+
+    // Alias the type for our UART pins to make things clearer.
+    type UartPins = (
+        hal::gpio::Pin<Gpio0, hal::gpio::Function<hal::gpio::Uart>>,
+        hal::gpio::Pin<Gpio1, hal::gpio::Function<hal::gpio::Uart>>,
+    );
+
+    // Alias the type for our UART to make things clearer.
+    type Uart = hal::uart::UartPeripheral<hal::uart::Enabled, hal::pac::UART0, UartPins>;
 
     // ----------------------------------------------------------------
     // -----  SHARED DATA
@@ -113,6 +125,7 @@ mod app {
         rtc: RealTimeClock,
         start_time: u32,
         recipe: Recipe::<N_RECIPE_SETPOINTS>,
+        uart: Uart,
     }
 
     // ----------------------------------------------------------------
@@ -172,7 +185,20 @@ mod app {
             second: 0,
         };
         
+
+         // --------------- REALTIME CLOCK --------------
+
         let rtc =  RealTimeClock::new(c.device.RTC, clocks.rtc_clock , &mut resets, initial_date_time).expect("ERROR IN NEW RTC");
+
+        
+         // --------------- UART --------------
+        // UART0 Tx = Gpio0, UART0 Rx = Gpio1
+        let uart_pins = ( pins.gpio0.into_mode::<hal::gpio::FunctionUart>(), pins.gpio1.into_mode::<hal::gpio::FunctionUart>());
+    
+        // Make a UART on the given pins            // &mut c.device.RESETS
+        let uart = hal::uart::UartPeripheral::new(c.device.UART0, uart_pins, &mut resets)
+            .enable( UartConfig::new(115200.Hz(), DataBits::Eight, None, StopBits::One),clocks.peripheral_clock.freq() ).unwrap();
+    
 
         // --------------- CREATE RECIPE --------------
         
@@ -311,6 +337,7 @@ mod app {
             rtc,
             start_time,
             recipe,
+            uart,
             }, 
         init::Monotonics(monotonic)
         )
@@ -465,6 +492,7 @@ mod app {
             rtc,
             start_time,
             recipe,
+            uart,
             ],
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
@@ -504,11 +532,30 @@ mod app {
             pwm_lr.set_duty_factor(pwm_out*0.9);
             pwm_fb.set_duty_factor(pwm_out*0.95);    
 
+            // ------------------ UART SEND ---------------
+            let mut json_buf = [0_u8; 200];
+            let buf_len = serde_json_core::ser::to_slice(m, &mut json_buf).unwrap();
+            info!("LENGTH {:?}, JSON: {:?}", buf_len, json_buf);
+
+            // ------------------ UART RECEIVE ---------------
+            let mut buffer = [0_u8; 30];
+            c.local.uart.write_full_blocking(&json_buf);
+            if  c.local.uart.uart_is_readable() {
+                let res = c.local.uart.read_full_blocking(&mut buffer);
+                match res {
+                    Ok(_) =>{info!("Read UART Data: {:?}", buffer)},
+                    Err(e) => {info!("READ ERROR")},
+                }
+            }
 
             info!("TIME: {:?}, \tSEG: {:?}, \tSP: ( {:?} C, {:?}, {:?} ) \tT:( {:?},\t{:?},\t{:?},\t{:?} ),\tP: ( {:?}, {:?} ), PSTATE( {:?}, {:?} ) \tDF:{:?}", 
-            elapsed, segment, sp.temp, sp.p_chamber, sp.p_bladder, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, ps_chbr, ps_bladder, pwm_out);            
+            elapsed, segment, sp.temp, sp.p_chamber, sp.p_bladder, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, ps_chbr, ps_bladder, pwm_out);     
+            
+
+    
 
         });
+
 
 
         control_loop_task::spawn_after(MicrosDurationU64::millis(CONTROL_LOOP_TICK_MS)).unwrap();
