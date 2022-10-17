@@ -5,12 +5,15 @@ use rp_pico::hal::gpio;
 use rp_pico::hal::gpio::{PinId, Output, PushPull};
 use rp_pico::hal::spi::{Spi, Enabled};
 
+
+
 // Logging stuff..
 use defmt::*;
 use defmt_rtt as _;
 
 use ChipSelectState::{Selected, Deselected};
 use TCChannel::{Center, LeftRight, FrontBack};
+use serde::{Serialize, Deserialize};
 
 // Constants
 const HIGH_WORD_DATA_MASK:u16 = 0b1111_1111_1111_1100;
@@ -34,7 +37,7 @@ pub enum TCChannel {
     LeftRight,
     FrontBack,
 }
-#[derive(Debug, Copy, Clone, Format, PartialEq)]
+#[derive(Debug, Copy, Clone, Format, PartialEq, Serialize, Deserialize)]
 pub enum TCError {
     TempSensorShortToVCC,
     TempSensorShortToGND,

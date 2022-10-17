@@ -1,8 +1,9 @@
 use crate::thermocouple_controller::TCError;
-
+use serde::{Serialize, Deserialize};
+// use serde_json_core;
 use defmt_rtt as _;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct Measurement {
     pub temp_ctr: f32,
     pub temp_lr: f32,
