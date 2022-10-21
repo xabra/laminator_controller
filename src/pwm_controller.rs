@@ -21,6 +21,9 @@ impl <I: PinId> PWM <I> {
     pub fn set_duty_factor(&mut self, df: f32){
         self.duty_thresh = (df*(self.counter_max as f32)) as u16;
     }
+    pub fn get_duty_factor (&self) -> f32 {
+        (self.duty_thresh as f32)/(self.counter_max as f32)
+    }
     pub fn get_duty_threshold (&self) -> u16 {
         self.duty_thresh
     }
