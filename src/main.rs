@@ -3,6 +3,7 @@
 
 pub mod pwm_controller;
 pub mod valve_controller;
+pub mod chamber_controller;
 pub mod thermocouple_controller;
 pub mod pressure_sensor_controller;
 pub mod signal_processing;
@@ -14,7 +15,8 @@ use panic_halt as _;
 use defmt_rtt as _;
 
 /*
-This is RTIC version
+===== Possible TO DOs =====
+> Use stateful output pins as the authority on pinstate?
 */
 
 // Place unused IRQs in the dispatchers list.  You need one IRQ for each priority level in your code
@@ -40,7 +42,7 @@ mod app {
     use hal::uart::{DataBits, StopBits, UartConfig};
     use serde_json_core;
 
-    use crate::{pwm_controller::PWM, thermocouple_controller::TCError, valve_controller::PressureState};
+    use crate::{pwm_controller::PWM, thermocouple_controller::TCError, chamber_controller::PressureState};
     use crate::valve_controller::{ValveController, ValveState};
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
@@ -225,9 +227,9 @@ mod app {
 
         // ----------- VALVE CONTROLLER SETUP ------------
         // Create the valve controllers and initialize them. Need to check logic polarity
-        let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output(), P_ATM_THRESHOLD, P_VACUUM_THRESHOLD);
+        let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output()); //, P_ATM_THRESHOLD, P_VACUUM_THRESHOLD
         main_chamber_valve.set_valve_state(ValveState::Pump);
-        let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output(), P_ATM_THRESHOLD, P_VACUUM_THRESHOLD);
+        let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());  // , P_ATM_THRESHOLD, P_VACUUM_THRESHOLD
         bladder_valve.set_valve_state(ValveState::Pump);
 
         // ------------- THERMOCOUPLE CONTROLLER ---------
@@ -281,11 +283,15 @@ mod app {
             temp_ctr: 0.0,
             temp_lr: 0.0,
             temp_fb: 0.0,   
+            temp_avg: 0.0,
             temp_err_ctr: TCError::NoTCError,
             temp_err_lr: TCError::NoTCError,
             temp_err_fb: TCError::NoTCError,
             p_chamber: 0.0,
             p_bladder: 0.0,
+            duty_factor_ctr: 0.0,
+            duty_factor_lr: 0.0,
+            duty_factor_fb: 0.0,
         };
 
         // ----- PID Controller -----
@@ -322,7 +328,6 @@ mod app {
             tc_controller,
             pressure_sensor_controller,
             measurement,
-            //mono,
             }, 
         Local {
             temp_ctr_filter,
@@ -508,10 +513,11 @@ mod app {
             
             // Compute average measured temperature
             let temp_avg: f32 = average_temp(m); 
+            m.temp_avg = temp_avg;
 
             // Determine chamber pressure states (informational only)
-            let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
-            let ps_bladder: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
+            //let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
+            //let ps_bladder: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
 
             // Set the valves per the setpoints for each chamber
             match sp.p_chamber {
@@ -528,36 +534,38 @@ mod app {
             let pwm_out: f32 =  c.local.pid_controller.update(temp_avg, sp.temp);
 
             // Set the duty_factors for the 3 sets of heaters
-            pwm_ctr.set_duty_factor(pwm_out);
-            pwm_lr.set_duty_factor(pwm_out*0.9);
-            pwm_fb.set_duty_factor(pwm_out*0.95);    
+            let df_ctr = pwm_out;
+            let df_lr = pwm_out*0.9;
+            let df_fb = pwm_out*0.95;
+            pwm_ctr.set_duty_factor(df_ctr);
+            pwm_lr.set_duty_factor(df_lr);
+            pwm_fb.set_duty_factor(df_fb); 
+            m.duty_factor_ctr = df_ctr;
+            m.duty_factor_lr = df_lr;
+            m.duty_factor_fb = df_fb;
 
             // ------------------ UART SEND ---------------
-            let mut json_buf = [0_u8; 200];
-            let buf_len = serde_json_core::ser::to_slice(m, &mut json_buf).unwrap();
-            info!("LENGTH {:?}, JSON: {:?}", buf_len, json_buf);
+            let mut json_buf = [0_u8; 400];     // Create oversized buffer to hold JSON string
+            let buf_len = serde_json_core::ser::to_slice(m, &mut json_buf).unwrap();    // Serialize struct m into buffer/slice
+            c.local.uart.write_full_blocking(&json_buf[..buf_len]);        // Write buffer/string to UART
 
             // ------------------ UART RECEIVE ---------------
-            let mut buffer = [0_u8; 30];
-            c.local.uart.write_full_blocking(&json_buf);
-            if  c.local.uart.uart_is_readable() {
-                let res = c.local.uart.read_full_blocking(&mut buffer);
-                match res {
-                    Ok(_) =>{info!("Read UART Data: {:?}", buffer)},
-                    Err(e) => {info!("READ ERROR")},
-                }
-            }
+            // let mut buffer = [0_u8; 30];
+            // 
+            // if  c.local.uart.uart_is_readable() {
+            //     let res = c.local.uart.read_full_blocking(&mut buffer);
+            //     match res {
+            //         Ok(_) =>{info!("Read UART Data: {:?}", buffer)},
+            //         Err(e) => {info!("READ ERROR")},
+            //     }
+            // }
 
-            info!("TIME: {:?}, \tSEG: {:?}, \tSP: ( {:?} C, {:?}, {:?} ) \tT:( {:?},\t{:?},\t{:?},\t{:?} ),\tP: ( {:?}, {:?} ), PSTATE( {:?}, {:?} ) \tDF:{:?}", 
-            elapsed, segment, sp.temp, sp.p_chamber, sp.p_bladder, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, ps_chbr, ps_bladder, pwm_out);     
-            
-
-    
+            info!("TIME: {:?}, \tSEG: {:?}, \tSP: ( {:?} C, {:?}, {:?} ) \tT:( {:?},\t{:?},\t{:?},\t{:?} ),\tP: ( {:?}, {:?} ), \tDF:{:?} \tLEN:{:?}", 
+            elapsed, segment, sp.temp, sp.p_chamber, sp.p_bladder, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, pwm_out, buf_len);     
 
         });
 
-
-
+        // --- Reschedule this task
         control_loop_task::spawn_after(MicrosDurationU64::millis(CONTROL_LOOP_TICK_MS)).unwrap();
     }
 
