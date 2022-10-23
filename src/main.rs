@@ -47,7 +47,7 @@ mod app {
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
     use crate::signal_processing::{MovingAverageFilter, PIDController};
-    use crate::data_structs::Measurement;
+    use crate::data_structs::{Measurement};
     use crate::recipe_manager::{SetPoint, VacuumSetpoint::{Vented, Evacuated}, Recipe};
 
 
@@ -292,6 +292,14 @@ mod app {
             duty_factor_ctr: 0.0,
             duty_factor_lr: 0.0,
             duty_factor_fb: 0.0,
+
+            // Setpoints
+            temp_sp: 0.0,   // Current temp setpoint
+            temp_trim_lr_sp: 1.0,
+            temp_trim_fb_sp: 1.0,
+            valve_state_chbr: ValveState::Pump,
+            valve_state_bladder: ValveState::Pump,
+            time_elapsed: 0, // Recipe elapsed time.
         };
 
         // ----- PID Controller -----
@@ -534,8 +542,10 @@ mod app {
             let pwm_out: f32 =  c.local.pid_controller.update(temp_avg, sp.temp);
 
             // Set the duty_factors for the 3 sets of heaters
+            let temp_trim_lr_sp = 0.9;
+            let temp_trim_fb_sp = 0.95;
             let df_ctr = pwm_out;
-            let df_lr = pwm_out*0.9;
+            let df_lr = pwm_out*temp_trim_lr_sp;
             let df_fb = pwm_out*0.95;
             pwm_ctr.set_duty_factor(df_ctr);
             pwm_lr.set_duty_factor(df_lr);
@@ -544,14 +554,24 @@ mod app {
             m.duty_factor_lr = df_lr;
             m.duty_factor_fb = df_fb;
 
+            m.temp_sp = sp.temp;   // Current temp setpoint
+            m.temp_trim_lr_sp = temp_trim_lr_sp;
+            m.temp_trim_fb_sp = temp_trim_fb_sp;
+            m.valve_state_chbr = ValveState::Pump;
+            m.valve_state_bladder = ValveState::Vent;
+            m.time_elapsed = elapsed; // Recipe elapsed time.
+
             // ------------------ UART SEND ---------------
-            let mut json_buf = [0_u8; 400];     // Create oversized buffer to hold JSON string
+            let mut json_buf = [0_u8; 450];     // Create oversized buffer to hold JSON string
             let buf_len = serde_json_core::ser::to_slice(m, &mut json_buf).unwrap();    // Serialize struct m into buffer/slice
-            c.local.uart.write_full_blocking(&json_buf[..buf_len]);        // Write buffer/string to UART
+            //let buf_len = serde_json_core::ser::to_slice(&test_data, &mut json_buf).unwrap();    // Serialize struct m into buffer/slice
+            json_buf[buf_len] = 0x0a;   // Append newline 'char'
+            c.local.uart.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
+            info!("Sent bytes = {:?}, incl newline", buf_len+1);
 
             // ------------------ UART RECEIVE ---------------
-            // let mut buffer = [0_u8; 30];
-            // 
+            // let mut buffer = [0_u8; 450];
+            
             // if  c.local.uart.uart_is_readable() {
             //     let res = c.local.uart.read_full_blocking(&mut buffer);
             //     match res {
@@ -560,8 +580,8 @@ mod app {
             //     }
             // }
 
-            info!("TIME: {:?}, \tSEG: {:?}, \tSP: ( {:?} C, {:?}, {:?} ) \tT:( {:?},\t{:?},\t{:?},\t{:?} ),\tP: ( {:?}, {:?} ), \tDF:{:?} \tLEN:{:?}", 
-            elapsed, segment, sp.temp, sp.p_chamber, sp.p_bladder, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, pwm_out, buf_len);     
+           // info!("TIME: {:?}, \tSEG: {:?}, \tSP: ( {:?} C, {:?}, {:?} ) \tT:( {:?},\t{:?},\t{:?},\t{:?} ),\tP: ( {:?}, {:?} ), \tDF:{:?} \tLEN:{:?}", 
+           // elapsed, segment, sp.temp, sp.p_chamber, sp.p_bladder, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, pwm_out, buf_len);     
 
         });
 
