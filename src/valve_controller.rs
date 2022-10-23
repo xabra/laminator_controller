@@ -4,8 +4,9 @@ use rp_pico::hal::gpio;
 use rp_pico::hal::gpio::PinId;
 use rp_pico::hal::gpio::Output;
 use rp_pico::hal::gpio::PushPull;
+use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Copy, Clone, defmt::Format)]
+#[derive(Debug, Copy, Clone, defmt::Format, PartialEq, Serialize, Deserialize)]
 pub enum ValveState {
     Vent,
     Pump,
