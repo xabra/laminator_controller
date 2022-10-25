@@ -40,9 +40,10 @@ mod app {
     use rp_pico::hal::gpio::Pin;
     use rp_pico::hal::gpio::FunctionI2C;
     use hal::uart::{DataBits, StopBits, UartConfig};
+    use embedded_hal::serial::Read;
     use serde_json_core;
 
-    use crate::{pwm_controller::PWM, thermocouple_controller::TCError, chamber_controller::PressureState};
+    use crate::{pwm_controller::PWM, thermocouple_controller::TCError};
     use crate::valve_controller::{ValveController, ValveState};
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
@@ -82,6 +83,8 @@ mod app {
 
     // Alias the type for our UART to make things clearer.
     type Uart = hal::uart::UartPeripheral<hal::uart::Enabled, hal::pac::UART0, UartPins>;
+    type UartReader = hal::uart::Reader<hal::pac::UART0, UartPins>;
+    type UartWriter = hal::uart::Writer<hal::pac::UART0, UartPins>;
 
     // ----------------------------------------------------------------
     // -----  SHARED DATA
@@ -108,6 +111,8 @@ mod app {
 
         // Measurement data
         measurement: Measurement,
+        uart: Uart,
+        //uart_reader: UartReader,
     }
 
     // ----------------------------------------------------------------
@@ -127,7 +132,8 @@ mod app {
         rtc: RealTimeClock,
         start_time: u32,
         recipe: Recipe::<N_RECIPE_SETPOINTS>,
-        uart: Uart,
+        //uart: Uart,
+        //uart_writer: UartWriter,
     }
 
     // ----------------------------------------------------------------
@@ -188,19 +194,23 @@ mod app {
         };
         
 
-         // --------------- REALTIME CLOCK --------------
+         // --------------- INIT REALTIME CLOCK --------------
 
         let rtc =  RealTimeClock::new(c.device.RTC, clocks.rtc_clock , &mut resets, initial_date_time).expect("ERROR IN NEW RTC");
 
         
-         // --------------- UART --------------
-        // UART0 Tx = Gpio0, UART0 Rx = Gpio1
+         // --------------- INIT UART --------------
+        // Get the UART pins.  UART0 Tx = Gpio0, UART0 Rx = Gpio1
         let uart_pins = ( pins.gpio0.into_mode::<hal::gpio::FunctionUart>(), pins.gpio1.into_mode::<hal::gpio::FunctionUart>());
     
-        // Make a UART on the given pins            // &mut c.device.RESETS
-        let uart = hal::uart::UartPeripheral::new(c.device.UART0, uart_pins, &mut resets)
+        // Init a new UART using the given pins            // &mut c.device.RESETS
+        let mut uart = hal::uart::UartPeripheral::new(c.device.UART0, uart_pins, &mut resets)
             .enable( UartConfig::new(115200.Hz(), DataBits::Eight, None, StopBits::One),clocks.peripheral_clock.freq() ).unwrap();
-    
+        
+        // Split the UART into Reader and Writer.
+        //let (mut uart_reader, uart_writer) = uart.split();
+        //uart_reader.enable_rx_interrupt();
+        uart.enable_rx_interrupt();
 
         // --------------- CREATE RECIPE --------------
         
@@ -336,6 +346,7 @@ mod app {
             tc_controller,
             pressure_sensor_controller,
             measurement,
+            uart,
             }, 
         Local {
             temp_ctr_filter,
@@ -350,7 +361,9 @@ mod app {
             rtc,
             start_time,
             recipe,
-            uart,
+            //uart,
+            
+            //uart_writer,
             }, 
         init::Monotonics(monotonic)
         )
@@ -496,6 +509,7 @@ mod app {
         shared = [
             measurement, 
             pwm_ctr, pwm_lr, pwm_fb,
+            uart
             ],
         local = [
             toggle: bool = true, 
@@ -505,12 +519,13 @@ mod app {
             rtc,
             start_time,
             recipe,
-            uart,
+            //uart_writer,
+            
             ],
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
 
-        (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _| {
+        (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb, c.shared.uart).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _, u| {
             
             // Get elapsed time
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
@@ -566,31 +581,41 @@ mod app {
             let buf_len = serde_json_core::ser::to_slice(m, &mut json_buf).unwrap();    // Serialize struct m into buffer/slice
             //let buf_len = serde_json_core::ser::to_slice(&test_data, &mut json_buf).unwrap();    // Serialize struct m into buffer/slice
             json_buf[buf_len] = 0x0a;   // Append newline 'char'
-            c.local.uart.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
+            //c.local.uart_writer.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
+
+            u.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
+
             info!("Sent bytes = {:?}, incl newline", buf_len+1);
-
-            // ------------------ UART RECEIVE ---------------
-            // let mut buffer = [0_u8; 450];
-            
-            // if  c.local.uart.uart_is_readable() {
-            //     let res = c.local.uart.read_full_blocking(&mut buffer);
-            //     match res {
-            //         Ok(_) =>{info!("Read UART Data: {:?}", buffer)},
-            //         Err(e) => {info!("READ ERROR")},
-            //     }
-            // }
-
-           // info!("TIME: {:?}, \tSEG: {:?}, \tSP: ( {:?} C, {:?}, {:?} ) \tT:( {:?},\t{:?},\t{:?},\t{:?} ),\tP: ( {:?}, {:?} ), \tDF:{:?} \tLEN:{:?}", 
-           // elapsed, segment, sp.temp, sp.p_chamber, sp.p_bladder, m.temp_ctr, m.temp_lr, m.temp_fb, temp_avg, m.p_chamber, m.p_bladder, pwm_out, buf_len);     
-
         });
 
         // --- Reschedule this task
         control_loop_task::spawn_after(MicrosDurationU64::millis(CONTROL_LOOP_TICK_MS)).unwrap();
     }
 
+
+    // ----------------------------------------------------------------
+    // -- UART RECEIVE TASK
+    // ----------------------------------------------------------------
+     #[task(
+        priority = 2, 
+        binds = UART0_IRQ,  
+        shared = [uart],    //uart_reader
+        local = [],
+    )]
+    fn uart_receive_task (c: uart_receive_task::Context) { 
+        let mut uart = c.shared.uart;        //c.shared.uart_reader;
+
+        uart.lock(|u|{
+            match u.read() {
+                Ok(byte) => {info!("IRQ! {:?}", byte);}
+                Err(e) => {info!("IRQ-ERR!");}
+            }
+        });
+    }
+
+
     // Computes an average temp using only the good (no error) TCs
-    // TODO: should return an error is good_tc_count == 0
+    // TODO: should return an error if good_tc_count == 0
     fn average_temp(m: &mut Measurement) -> f32 {
         let mut good_tc_count:u32 = 0;
         let mut temp_sum: f32 = 0.0;
