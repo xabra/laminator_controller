@@ -27,3 +27,9 @@ pub struct Measurement {
     pub time_elapsed: u32, // Recipe elapsed time.
 
 }
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, defmt::Format)]
+pub struct Command<'a> {
+    pub cmd: &'a str,   
+    pub value: &'a str,
+}

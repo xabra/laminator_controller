@@ -23,6 +23,8 @@ use defmt_rtt as _;
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true, dispatchers = [ADC_IRQ_FIFO, UART1_IRQ, DMA_IRQ_1])]    
 mod app {
 
+    use core::fmt::Error;
+
     use embedded_hal::digital::v2::OutputPin;
     use fugit::{MicrosDurationU32, MicrosDurationU64 ,RateExtU32};
     use defmt::*;
@@ -48,7 +50,7 @@ mod app {
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
     use crate::signal_processing::{MovingAverageFilter, PIDController};
-    use crate::data_structs::{Measurement};
+    use crate::data_structs::{Measurement, Command};
     use crate::recipe_manager::{SetPoint, VacuumSetpoint::{Vented, Evacuated}, Recipe};
 
 
@@ -67,6 +69,8 @@ mod app {
     const FILTER_LENGTH: usize = 50;
 
     const N_RECIPE_SETPOINTS: usize = 4;
+
+    const UART_RCV_BUF_MAX: usize = 50;
 
     const P_ATM_THRESHOLD: f32 = -200.0;            // Pa.  Above this pressure is considered atmosphere
     const P_VACUUM_THRESHOLD: f32 = -100_000.0;     // Pa  Below this pressure is considered vacuum
@@ -132,6 +136,8 @@ mod app {
         rtc: RealTimeClock,
         start_time: u32,
         recipe: Recipe::<N_RECIPE_SETPOINTS>,
+        msg_len: usize, // UART Receive message length
+        buffer: [u8; UART_RCV_BUF_MAX], // Place to hold received bytes (should be in local or shared???)
         //uart: Uart,
         //uart_writer: UartWriter,
     }
@@ -207,6 +213,8 @@ mod app {
         let mut uart = hal::uart::UartPeripheral::new(c.device.UART0, uart_pins, &mut resets)
             .enable( UartConfig::new(115200.Hz(), DataBits::Eight, None, StopBits::One),clocks.peripheral_clock.freq() ).unwrap();
         
+        let mut buffer = [0_u8; UART_RCV_BUF_MAX];  // Place to hold received bytes (should be in local or shared???)
+        let mut msg_len = 0;        // Number of received bytes.  Should be in local or shared??
         // Split the UART into Reader and Writer.
         //let (mut uart_reader, uart_writer) = uart.split();
         //uart_reader.enable_rx_interrupt();
@@ -362,6 +370,9 @@ mod app {
             start_time,
             recipe,
             //uart,
+            msg_len,
+            buffer,
+            
             
             //uart_writer,
             }, 
@@ -579,7 +590,7 @@ mod app {
             // ------------------ UART SEND ---------------
             let mut json_buf = [0_u8; 450];     // Create oversized buffer to hold JSON string
             let buf_len = serde_json_core::ser::to_slice(m, &mut json_buf).unwrap();    // Serialize struct m into buffer/slice
-            //let buf_len = serde_json_core::ser::to_slice(&test_data, &mut json_buf).unwrap();    // Serialize struct m into buffer/slice
+            //let buf_len = serde_json_core::ser::to_slice(&test_data, &mut json_buf).unwrap();    // Testing...Serialize struct m into buffer/slice
             json_buf[buf_len] = 0x0a;   // Append newline 'char'
             //c.local.uart_writer.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
 
@@ -600,19 +611,61 @@ mod app {
         priority = 2, 
         binds = UART0_IRQ,  
         shared = [uart],    //uart_reader
-        local = [],
+        local = [buffer, msg_len],
     )]
     fn uart_receive_task (c: uart_receive_task::Context) { 
         let mut uart = c.shared.uart;        //c.shared.uart_reader;
 
-        uart.lock(|u|{
-            match u.read() {
-                Ok(byte) => {info!("IRQ! {:?}", byte);}
-                Err(e) => {info!("IRQ-ERR!");}
+        uart.lock(|u|{      // Lock the shared uart
+            while let Ok(byte) = u.read() {                 // Read bytes until none avail in FIFO
+                if byte != 0x0a {   // If byte is not a newline, 
+                    c.local.buffer[*c.local.msg_len] = byte;     // Accumulate byte into buffer
+                    *c.local.msg_len += 1;           // Increment the message length
+                } else {        // Otherwise, if we found a newline char...
+                    let sslice = core::str::from_utf8(&c.local.buffer[0..*c.local.msg_len]).unwrap();   // Convert buffer to string slice for debug
+                    
+                    //info!("UI >> Controller Received Message {}", sslice);        // Print the msg contents
+                    let result: Result<(Command, usize), serde_json_core::de::Error> = serde_json_core::from_slice(&c.local.buffer[0..*c.local.msg_len]);
+                    if let Ok((command, byte_count)) = result  {
+                        //info!("Parsed command object: {:?}, {:?}", command, byte_count);
+                        handle_command(command);
+                    } else {
+                        info!("Deserialize failed");
+                    }
+                    *c.local.msg_len = 0;    // reset the
+                }
             }
         });
     }
 
+    fn handle_command(command: Command) {
+        match command.cmd {
+            "set_temp" => {
+                let v = command.value.parse::<f32>().unwrap();
+                info!("Setting temp to: {:?}", v);
+            }
+            "set_heater_trim_lr" => {
+                let v = command.value.parse::<f32>().unwrap();
+                info!("Setting heater lr trim to: {:?}", v);
+            }
+            "set_heater_trim_fb" => {
+                let v = command.value.parse::<f32>().unwrap();
+                info!("Setting heater fb trim to: {:?}", v);
+            }
+            "set_valve_state_chbr" => {
+                info!("Setting chamber valve: {:?}", command.value);
+            }
+            "set_valve_state_bladder" => {
+                info!("Setting bladder valve: {:?}", command.value);
+            }
+            "set_system_pwr" => {
+                info!("Setting power: {:?}", command.value);
+            }
+
+            // Default case
+            _ => {info!("No command found");}
+        }
+    }
 
     // Computes an average temp using only the good (no error) TCs
     // TODO: should return an error if good_tc_count == 0
