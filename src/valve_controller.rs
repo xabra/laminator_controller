@@ -14,6 +14,7 @@ pub enum ValveState {
 
 pub struct ValveController<I: PinId> {
     valve_pin: gpio::Pin<I, Output<PushPull>>,
+    current_valve_state: ValveState,
     }
 
 impl <I: PinId> ValveController<I> {
@@ -22,14 +23,26 @@ impl <I: PinId> ValveController<I> {
     ) -> ValveController<I> {
         ValveController{
             valve_pin,
+            current_valve_state: ValveState::Pump,  // Initial state on creation  TODO pass this in?
         }
     }
 
-    pub fn set_valve_state(&mut self, state:ValveState){
-        match state {
-            ValveState::Vent => self.valve_pin.set_high().unwrap(),
-            ValveState::Pump => self.valve_pin.set_low().unwrap(),
-        } 
+    pub fn set_valve_state(&mut self, new_valve_state:ValveState){
+        if new_valve_state != self.current_valve_state {      // If state changed...
+            self.current_valve_state = new_valve_state;           // Update internal state variable
+            match new_valve_state {                               // drive the pin appropriately 
+                ValveState::Vent => {
+                    self.valve_pin.set_high().unwrap();
+                },
+                ValveState::Pump => {
+                    self.valve_pin.set_low().unwrap();
+                },
+            } 
+        }
+
+    }
+    pub fn get_valve_state(&self) -> ValveState{
+        self.current_valve_state    // Return current state
     }
 
 }
