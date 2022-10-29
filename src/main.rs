@@ -70,7 +70,9 @@ mod app {
 
     const N_RECIPE_SETPOINTS: usize = 4;
 
-    const UART_RCV_BUF_MAX: usize = 50;
+    const UART_RCV_BUF_MAX: usize = 80;
+
+    const UART_BAUDRATE: u32 = 57600;   // 28800, 57600, 115200
 
     const P_ATM_THRESHOLD: f32 = -200.0;            // Pa.  Above this pressure is considered atmosphere
     const P_VACUUM_THRESHOLD: f32 = -100_000.0;     // Pa  Below this pressure is considered vacuum
@@ -211,7 +213,7 @@ mod app {
     
         // Init a new UART using the given pins            // &mut c.device.RESETS
         let mut uart = hal::uart::UartPeripheral::new(c.device.UART0, uart_pins, &mut resets)
-            .enable( UartConfig::new(115200.Hz(), DataBits::Eight, None, StopBits::One),clocks.peripheral_clock.freq() ).unwrap();
+            .enable( UartConfig::new(UART_BAUDRATE.Hz(), DataBits::Eight, None, StopBits::One),clocks.peripheral_clock.freq() ).unwrap();
         
         let mut buffer = [0_u8; UART_RCV_BUF_MAX];  // Place to hold received bytes (should be in local or shared???)
         let mut msg_len = 0;        // Number of received bytes.  Should be in local or shared??
@@ -588,8 +590,10 @@ mod app {
             m.time_elapsed = elapsed; // Recipe elapsed time.
 
             // ------------------ UART SEND ---------------
+            //let mut json_buf = [0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,];
             let mut json_buf = [0_u8; 450];     // Create oversized buffer to hold JSON string
             let buf_len = serde_json_core::ser::to_slice(m, &mut json_buf).unwrap();    // Serialize struct m into buffer/slice
+            //let buf_len = json_buf.len();
             //let buf_len = serde_json_core::ser::to_slice(&test_data, &mut json_buf).unwrap();    // Testing...Serialize struct m into buffer/slice
             json_buf[buf_len] = 0x0a;   // Append newline 'char'
             //c.local.uart_writer.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
