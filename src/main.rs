@@ -109,6 +109,7 @@ mod app {
         measurement: Measurement,
 
         uart: Uart,
+        // TODO split uart into reader and writer and make each local.
         //uart_reader: UartReader,
     }
 
@@ -397,11 +398,11 @@ mod app {
     )]
     fn pwm_period_task (mut c: pwm_period_task::Context) { 
 
-        let mut alarm = c.local.alarm1;
-        //(alarm).lock(|a|{
-            alarm.clear_interrupt();
-            let _ = alarm.schedule(PWM_TICK_US);
-        //});
+        // Restart the task
+        let alarm = c.local.alarm1;
+        alarm.clear_interrupt();
+        let _ = alarm.schedule(PWM_TICK_US);
+
 
         // Increment and wrap counter if necesary
         *c.local.counter += 1;
