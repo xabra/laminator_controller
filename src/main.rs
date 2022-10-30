@@ -70,8 +70,8 @@ mod app {
 
     const N_RECIPE_SETPOINTS: usize = 4;
 
-    const UART_RCV_BUF_MAX: usize = 80;
-
+    const UART_RX_BUF_MAX: usize = 80;
+    const UART_TX_BUF_MAX: usize = 450;
     const UART_BAUDRATE: u32 = 57600;   // 28800, 57600, 115200
 
     const P_ATM_THRESHOLD: f32 = -200.0;            // Pa.  Above this pressure is considered atmosphere
@@ -107,9 +107,6 @@ mod app {
 
         // Measurement data
         measurement: Measurement,
-
-        //uart: Uart,
-        // TODO split uart into reader and writer and make each local.
     }
 
     // ----------------------------------------------------------------
@@ -141,8 +138,7 @@ mod app {
         start_time: u32,
         recipe: Recipe::<N_RECIPE_SETPOINTS>,
         msg_len: usize, // UART Receive message length
-        buffer: [u8; UART_RCV_BUF_MAX], // Place to hold received bytes (should be in local or shared???)
-        //uart: Uart,
+        buffer: [u8; UART_RX_BUF_MAX], // Place to hold received bytes (should be in local or shared???)
         uart_writer: UartWriter,
         uart_reader: UartReader,
     }
@@ -212,18 +208,19 @@ mod app {
         
          // --------------- INIT UART --------------
         // Get the UART pins.  UART0 Tx = Gpio0, UART0 Rx = Gpio1
-        let uart_pins = ( pins.gpio0.into_mode::<hal::gpio::FunctionUart>(), pins.gpio1.into_mode::<hal::gpio::FunctionUart>());
+        let uart_pins: UartPins = ( pins.gpio0.into_mode::<hal::gpio::FunctionUart>(), pins.gpio1.into_mode::<hal::gpio::FunctionUart>());
     
         // Init a new UART using the given pins            // &mut c.device.RESETS
-        let mut uart = hal::uart::UartPeripheral::new(c.device.UART0, uart_pins, &mut resets)
+        let uart: Uart = hal::uart::UartPeripheral::new(c.device.UART0, uart_pins, &mut resets)
             .enable( UartConfig::new(UART_BAUDRATE.Hz(), DataBits::Eight, None, StopBits::One),clocks.peripheral_clock.freq() ).unwrap();
         
-        let mut buffer = [0_u8; UART_RCV_BUF_MAX];  // Place to hold received bytes (should be in local or shared???)
-        let mut msg_len = 0;        // Number of received bytes.  Should be in local or shared??
         // Split the UART into Reader and Writer.
         let (mut uart_reader, uart_writer) = uart.split();
         uart_reader.enable_rx_interrupt();
-        //uart.enable_rx_interrupt();
+
+        let mut buffer = [0_u8; UART_RX_BUF_MAX];  // Place to hold received bytes (should be in local or shared???)
+        let mut msg_len = 0;        // Number of received bytes.  Should be in local or shared??
+
 
         // --------------- CREATE RECIPE --------------
         
@@ -356,7 +353,6 @@ mod app {
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
             measurement,
-            //uart,
             }, 
         Local {
             alarm1,
@@ -376,7 +372,6 @@ mod app {
             rtc,
             start_time,
             recipe,
-            //uart,
             msg_len,
             buffer,
             uart_writer,
@@ -545,7 +540,6 @@ mod app {
         shared = [
             measurement, 
             pwm_ctr, pwm_lr, pwm_fb,
-            //uart
             ],
         local = [
             toggle: bool = true, 
@@ -608,14 +602,9 @@ mod app {
             m.time_elapsed = elapsed; // Recipe elapsed time.
 
             // ------------------ UART SEND ---------------
-            //let mut json_buf = [0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,];
-            let mut json_buf = [0_u8; 450];     // Create oversized buffer to hold JSON string
+            let mut json_buf = [0_u8; UART_TX_BUF_MAX];     // Create oversized buffer to hold JSON string
             let buf_len = serde_json_core::ser::to_slice(m, &mut json_buf).unwrap();    // Serialize struct m into buffer/slice
-            //let buf_len = json_buf.len();
-            //let buf_len = serde_json_core::ser::to_slice(&test_data, &mut json_buf).unwrap();    // Testing...Serialize struct m into buffer/slice
             json_buf[buf_len] = 0x0a;   // Append newline 'char'
-            //c.local.uart_writer.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
-
             c.local.uart_writer.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
 
             info!("Sent bytes = {:?}, incl newline", buf_len+1);
@@ -632,11 +621,11 @@ mod app {
      #[task(
         priority = 2, 
         binds = UART0_IRQ,  
-        shared = [measurement],    //uart_reader
+        shared = [measurement],
         local = [buffer, msg_len, uart_reader],
     )]
     fn uart_receive_task (c: uart_receive_task::Context) { 
-        let mut uart_reader = c.local.uart_reader;        //c.shared.uart_reader;
+        let uart_reader = c.local.uart_reader; 
 
 
         while let Ok(byte) = uart_reader.read() {                 // Read bytes until none avail in FIFO
