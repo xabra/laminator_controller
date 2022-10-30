@@ -97,9 +97,6 @@ mod app {
     // ----------------------------------------------------------------
     #[shared]
     struct Shared {
-        // Heater PWM stuff
-        alarm1: hal::timer::Alarm1,     // For PWM tick
-        
         // Sample measurement
         alarm2: hal::timer::Alarm2,     // For sample tick
         debug_pin: hal::gpio::Pin<Gpio8, hal::gpio::PushPullOutput>,
@@ -127,6 +124,9 @@ mod app {
     // ----------------------------------------------------------------
     #[local]
     struct Local {
+        // Heater PWM stuff
+        alarm1: hal::timer::Alarm1,     // For PWM tick
+
         temp_ctr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         temp_lr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         temp_fb_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
@@ -190,7 +190,7 @@ mod app {
         // Create alarm1. When alarm1 triggers, it generates interrupt TIMER_IRQ_1
         let mut alarm1 = timer.alarm_1().unwrap();   
 
-        // Create alarm2. When alarm1 triggers, it generates interrupt TIMER_IRQ_2
+        // Create alarm2. When alarm2 triggers, it generates interrupt TIMER_IRQ_2
         let mut alarm2 = timer.alarm_2().unwrap();  
 
         let initial_date_time = DateTime {
@@ -352,7 +352,6 @@ mod app {
         
         // Init and return the Shared data structure
         (Shared { 
-            alarm1,
             alarm2,
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
@@ -362,6 +361,7 @@ mod app {
             uart,
             }, 
         Local {
+            alarm1,
             temp_ctr_filter,
             temp_lr_filter,
             temp_fb_filter,
@@ -392,16 +392,16 @@ mod app {
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_1,  
-        shared = [alarm1, pwm_ctr, pwm_lr, pwm_fb ],
-        local = [counter: u16 = 0],
+        shared = [pwm_ctr, pwm_lr, pwm_fb ],
+        local = [alarm1, counter: u16 = 0],
     )]
     fn pwm_period_task (mut c: pwm_period_task::Context) { 
 
-        let mut alarm = c.shared.alarm1;
-        (alarm).lock(|a|{
-            a.clear_interrupt();
-            let _ = a.schedule(PWM_TICK_US);
-        });
+        let mut alarm = c.local.alarm1;
+        //(alarm).lock(|a|{
+            alarm.clear_interrupt();
+            let _ = alarm.schedule(PWM_TICK_US);
+        //});
 
         // Increment and wrap counter if necesary
         *c.local.counter += 1;
