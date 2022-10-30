@@ -117,6 +117,7 @@ mod app {
 
         // Measurement data
         measurement: Measurement,
+
         uart: Uart,
         //uart_reader: UartReader,
     }
@@ -129,6 +130,7 @@ mod app {
         temp_ctr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         temp_lr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         temp_fb_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
+        temp_avg_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_chamber_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_bladder_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         // Valves
@@ -286,7 +288,7 @@ mod app {
             400.kHz(),
             &mut resets,
             &clocks.peripheral_clock,
-    );
+        );
 
         // Create new PressureSensorController
         let mut pressure_sensor_controller = PressureSensorController::new(ad_start_pin, ad_busy_pin, i2c);
@@ -296,6 +298,7 @@ mod app {
         let temp_ctr_filter = MovingAverageFilter::<f32, 50>::new();
         let temp_lr_filter = MovingAverageFilter::<f32, 50>::new();
         let temp_fb_filter = MovingAverageFilter::<f32, 50>::new();
+        let temp_avg_filter = MovingAverageFilter::<f32, 50>::new();
         let p_chamber_filter = MovingAverageFilter::<f32, 50>::new();
         let p_bladder_filter = MovingAverageFilter::<f32, 50>::new();
 
@@ -362,6 +365,7 @@ mod app {
             temp_ctr_filter,
             temp_lr_filter,
             temp_fb_filter,
+            temp_avg_filter,
             p_chamber_filter,
             p_bladder_filter,
             // Valves
@@ -438,6 +442,7 @@ mod app {
             temp_ctr_filter,
             temp_lr_filter,
             temp_fb_filter,
+            temp_avg_filter,
             p_chamber_filter,
             p_bladder_filter, 
         ],
@@ -451,26 +456,42 @@ mod app {
         let mut temp_ctr:f32 = 0.0;
         let mut temp_lr:f32 = 0.0;
         let mut temp_fb:f32 = 0.0;
+        let mut temp_avg: f32 = 0.0;
         let mut temp_err_ctr: TCError = TCError::NoTCError;
         let mut temp_err_lr: TCError = TCError::NoTCError;
         let mut temp_err_fb: TCError = TCError::NoTCError;
+        
 
         c.shared.tc_controller.lock(|tcc: _| {
+            let mut good_tc_count:u32 = 0;      // Number of good T/Cs for the average
+            let mut temp_sum: f32 = 0.0;        // for the average temp
 
             match tcc.acquire(TCChannel::Center) {
                 Err(e) => {temp_err_ctr = e;},
-                Ok(t) => { temp_ctr = t;},
+                Ok(t) => { 
+                    temp_ctr = t;
+                    temp_sum += t;
+                    good_tc_count += 1;
+                },
             }
 
             match tcc.acquire(TCChannel::LeftRight) {
                 Err(e) => {temp_err_lr = e;},
-                Ok(t) => { temp_lr = t;},
+                Ok(t) => { temp_lr = t;
+                    temp_sum += t;
+                    good_tc_count += 1;
+                },
             }
 
             match tcc.acquire(TCChannel::FrontBack) {
                 Err(e) => {temp_err_fb = e;},
-                Ok(t) => {temp_fb = t;},
+                Ok(t) => {
+                    temp_fb = t;
+                    temp_sum += t;
+                    good_tc_count += 1;
+                },
             };
+            temp_avg = temp_sum/(good_tc_count as f32)
 
         });
         
@@ -487,6 +508,7 @@ mod app {
         let temp_ctr_filtered = c.local.temp_ctr_filter.push(temp_ctr);
         let temp_lr_filtered = c.local.temp_lr_filter.push(temp_lr);
         let temp_fb_filtered = c.local.temp_fb_filter.push(temp_fb);
+        let temp_avg_filtered = c.local.temp_avg_filter.push(temp_avg);
         let p_chamber_filtered = c.local.p_chamber_filter.push(p_chamber);
         let p_bladder_filtered = c.local.p_bladder_filter.push(p_bladder);
 
@@ -495,6 +517,7 @@ mod app {
             m.temp_ctr = temp_ctr_filtered;
             m.temp_lr = temp_lr_filtered;
             m.temp_fb = temp_fb_filtered;
+            m.temp_avg = temp_avg_filtered;
             m.temp_err_ctr = temp_err_ctr;
             m.temp_err_lr = temp_err_lr;
             m.temp_err_fb = temp_err_fb;
@@ -546,10 +569,6 @@ mod app {
             
             // Get current setpoint from the recipe.  Interpolate setpoint temp
             let (sp, segment) = c.local.recipe.get_current_setpoint(elapsed);  
-            
-            // Compute average measured temperature
-            let temp_avg: f32 = average_temp(m); 
-            m.temp_avg = temp_avg;
 
             // Determine chamber pressure states (informational only)
             //let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
@@ -567,7 +586,7 @@ mod app {
             }
 
             // Get overall duty_factor from PID controller
-            let pwm_out: f32 =  c.local.pid_controller.update(temp_avg, sp.temp);
+            let pwm_out: f32 =  c.local.pid_controller.update(m.temp_avg, sp.temp);
 
             // Set the duty_factors for the 3 sets of heaters
             let temp_trim_lr_sp = 0.9;
@@ -614,7 +633,7 @@ mod app {
      #[task(
         priority = 2, 
         binds = UART0_IRQ,  
-        shared = [uart],    //uart_reader
+        shared = [uart, measurement],    //uart_reader
         local = [buffer, msg_len],
     )]
     fn uart_receive_task (c: uart_receive_task::Context) { 
@@ -626,11 +645,11 @@ mod app {
                     c.local.buffer[*c.local.msg_len] = byte;     // Accumulate byte into buffer
                     *c.local.msg_len += 1;           // Increment the message length
                 } else {        // Otherwise, if we found a newline char...
-                    let sslice = core::str::from_utf8(&c.local.buffer[0..*c.local.msg_len]).unwrap();   // Convert buffer to string slice for debug
+                    //let sslice = core::str::from_utf8(&c.local.buffer[0..*c.local.msg_len]).unwrap();   // Convert buffer to string slice for debug
                     
                     //info!("UI >> Controller Received Message {}", sslice);        // Print the msg contents
                     let result: Result<(Command, usize), serde_json_core::de::Error> = serde_json_core::from_slice(&c.local.buffer[0..*c.local.msg_len]);
-                    if let Ok((command, byte_count)) = result  {
+                    if let Ok((command, _)) = result  {
                         //info!("Parsed command object: {:?}, {:?}", command, byte_count);
                         handle_command(command);
                     } else {
@@ -658,6 +677,11 @@ mod app {
             }
             "set_valve_state_chbr" => {
                 info!("Setting chamber valve: {:?}", command.value);
+                match command.value {
+                    "Pump" => {},
+                    "Vent" => {},
+                    _ => {},
+                }
             }
             "set_valve_state_bladder" => {
                 info!("Setting bladder valve: {:?}", command.value);
@@ -670,27 +694,4 @@ mod app {
             _ => {info!("No command found");}
         }
     }
-
-    // Computes an average temp using only the good (no error) TCs
-    // TODO: should return an error if good_tc_count == 0
-    fn average_temp(m: &mut Measurement) -> f32 {
-        let mut good_tc_count:u32 = 0;
-        let mut temp_sum: f32 = 0.0;
-
-        if m.temp_err_ctr == TCError::NoTCError {
-            temp_sum += m.temp_ctr;
-            good_tc_count += 1;
-        }
-        if m.temp_err_lr == TCError::NoTCError {
-            temp_sum += m.temp_lr;
-            good_tc_count += 1;
-        }
-        if m.temp_err_fb == TCError::NoTCError {
-            temp_sum += m.temp_fb;
-            good_tc_count += 1;
-        }
-
-        temp_sum/(good_tc_count as f32)
-    }
-
 }
