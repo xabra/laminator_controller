@@ -105,12 +105,6 @@ mod app {
         pwm_lr: PWM<Gpio13>,
         pwm_fb: PWM<Gpio14>,
 
-        // Thermocouple
-        tc_controller: ThermocoupleController<Gpio17, Gpio19, Gpio20, SPI0>,
-
-        // Pressure Sensor Controller
-        pressure_sensor_controller: PressureSensorController<Gpio6, Gpio7, I2C<I2C0, (Pin<Gpio4, FunctionI2C>, Pin<Gpio5, FunctionI2C>)>>,
-
         // Measurement data
         measurement: Measurement,
 
@@ -126,6 +120,12 @@ mod app {
         // Heater PWM stuff
         alarm1: hal::timer::Alarm1,     // For PWM tick
         alarm2: hal::timer::Alarm2,     // For sample tick
+        
+        // Thermocouple
+        tc_controller: ThermocoupleController<Gpio17, Gpio19, Gpio20, SPI0>,
+
+        // Pressure Sensor Controller
+        pressure_sensor_controller: PressureSensorController<Gpio6, Gpio7, I2C<I2C0, (Pin<Gpio4, FunctionI2C>, Pin<Gpio5, FunctionI2C>)>>,
 
         temp_ctr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         temp_lr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
@@ -354,14 +354,14 @@ mod app {
         (Shared { 
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
-            tc_controller,
-            pressure_sensor_controller,
             measurement,
             uart,
             }, 
         Local {
             alarm1,
             alarm2,
+            tc_controller,
+            pressure_sensor_controller,
             temp_ctr_filter,
             temp_lr_filter,
             temp_fb_filter,
@@ -436,9 +436,11 @@ mod app {
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_2,  
-        shared = [debug_pin, tc_controller, pressure_sensor_controller, measurement],
+        shared = [debug_pin, measurement],
         local = [
             alarm2, 
+            tc_controller,
+            pressure_sensor_controller,
             toggle: bool = true,
             temp_ctr_filter,
             temp_lr_filter,
@@ -462,48 +464,46 @@ mod app {
         let mut temp_err_lr: TCError = TCError::NoTCError;
         let mut temp_err_fb: TCError = TCError::NoTCError;
         
+        let tcc = c.local.tc_controller;
+        let mut good_tc_count:u32 = 0;      // Number of good T/Cs for the average
+        let mut temp_sum: f32 = 0.0;        // for the average temp
 
-        c.shared.tc_controller.lock(|tcc: _| {
-            let mut good_tc_count:u32 = 0;      // Number of good T/Cs for the average
-            let mut temp_sum: f32 = 0.0;        // for the average temp
+        match tcc.acquire(TCChannel::Center) {
+            Err(e) => {temp_err_ctr = e;},
+            Ok(t) => { 
+                temp_ctr = t;
+                temp_sum += t;
+                good_tc_count += 1;
+            },
+        }
 
-            match tcc.acquire(TCChannel::Center) {
-                Err(e) => {temp_err_ctr = e;},
-                Ok(t) => { 
-                    temp_ctr = t;
-                    temp_sum += t;
-                    good_tc_count += 1;
-                },
-            }
+        match tcc.acquire(TCChannel::LeftRight) {
+            Err(e) => {temp_err_lr = e;},
+            Ok(t) => { temp_lr = t;
+                temp_sum += t;
+                good_tc_count += 1;
+            },
+        }
 
-            match tcc.acquire(TCChannel::LeftRight) {
-                Err(e) => {temp_err_lr = e;},
-                Ok(t) => { temp_lr = t;
-                    temp_sum += t;
-                    good_tc_count += 1;
-                },
-            }
+        match tcc.acquire(TCChannel::FrontBack) {
+            Err(e) => {temp_err_fb = e;},
+            Ok(t) => {
+                temp_fb = t;
+                temp_sum += t;
+                good_tc_count += 1;
+            },
+        };
+        temp_avg = temp_sum/(good_tc_count as f32);
 
-            match tcc.acquire(TCChannel::FrontBack) {
-                Err(e) => {temp_err_fb = e;},
-                Ok(t) => {
-                    temp_fb = t;
-                    temp_sum += t;
-                    good_tc_count += 1;
-                },
-            };
-            temp_avg = temp_sum/(good_tc_count as f32)
-
-        });
         
         // Acquire pressure measurements
         let mut p_chamber:f32 = 0.0;
         let mut p_bladder:f32 = 0.0;
-        (c.shared.pressure_sensor_controller).lock(|psc: _| {
-            psc.acquire_all();
-            p_chamber = psc.get_pressure(0);
-            p_bladder = psc.get_pressure(2);
-        });
+        let psc = c.local.pressure_sensor_controller;
+        psc.acquire_all();
+        p_chamber = psc.get_pressure(0);
+        p_bladder = psc.get_pressure(2);
+
 
         // Filter all input signals
         let temp_ctr_filtered = c.local.temp_ctr_filter.push(temp_ctr);
