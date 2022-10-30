@@ -98,7 +98,6 @@ mod app {
     #[shared]
     struct Shared {
         // Sample measurement
-        alarm2: hal::timer::Alarm2,     // For sample tick
         debug_pin: hal::gpio::Pin<Gpio8, hal::gpio::PushPullOutput>,
 
         // Heater PWMs
@@ -126,6 +125,7 @@ mod app {
     struct Local {
         // Heater PWM stuff
         alarm1: hal::timer::Alarm1,     // For PWM tick
+        alarm2: hal::timer::Alarm2,     // For sample tick
 
         temp_ctr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         temp_lr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
@@ -352,7 +352,6 @@ mod app {
         
         // Init and return the Shared data structure
         (Shared { 
-            alarm2,
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
             tc_controller,
@@ -362,6 +361,7 @@ mod app {
             }, 
         Local {
             alarm1,
+            alarm2,
             temp_ctr_filter,
             temp_lr_filter,
             temp_fb_filter,
@@ -436,8 +436,9 @@ mod app {
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_2,  
-        shared = [alarm2, debug_pin, tc_controller, pressure_sensor_controller, measurement],
+        shared = [debug_pin, tc_controller, pressure_sensor_controller, measurement],
         local = [
+            alarm2, 
             toggle: bool = true,
             temp_ctr_filter,
             temp_lr_filter,
@@ -530,11 +531,10 @@ mod app {
 
 
         // Schedule next iteration
-        let mut alarm = c.shared.alarm2;
-        (alarm).lock(|a|{
-            a.clear_interrupt();
-            let _ = a.schedule(SAMPLE_TICK_US);
-        });
+        let mut alarm = c.local.alarm2;
+        alarm.clear_interrupt();
+        let _ = alarm.schedule(SAMPLE_TICK_US);
+
     }
 
     // ----------------------------------------------------------------
