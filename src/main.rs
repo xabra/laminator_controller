@@ -108,9 +108,8 @@ mod app {
         // Measurement data
         measurement: Measurement,
 
-        uart: Uart,
+        //uart: Uart,
         // TODO split uart into reader and writer and make each local.
-        //uart_reader: UartReader,
     }
 
     // ----------------------------------------------------------------
@@ -144,7 +143,8 @@ mod app {
         msg_len: usize, // UART Receive message length
         buffer: [u8; UART_RCV_BUF_MAX], // Place to hold received bytes (should be in local or shared???)
         //uart: Uart,
-        //uart_writer: UartWriter,
+        uart_writer: UartWriter,
+        uart_reader: UartReader,
     }
 
     // ----------------------------------------------------------------
@@ -221,9 +221,9 @@ mod app {
         let mut buffer = [0_u8; UART_RCV_BUF_MAX];  // Place to hold received bytes (should be in local or shared???)
         let mut msg_len = 0;        // Number of received bytes.  Should be in local or shared??
         // Split the UART into Reader and Writer.
-        //let (mut uart_reader, uart_writer) = uart.split();
-        //uart_reader.enable_rx_interrupt();
-        uart.enable_rx_interrupt();
+        let (mut uart_reader, uart_writer) = uart.split();
+        uart_reader.enable_rx_interrupt();
+        //uart.enable_rx_interrupt();
 
         // --------------- CREATE RECIPE --------------
         
@@ -356,7 +356,7 @@ mod app {
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
             measurement,
-            uart,
+            //uart,
             }, 
         Local {
             alarm1,
@@ -379,9 +379,8 @@ mod app {
             //uart,
             msg_len,
             buffer,
-            
-            
-            //uart_writer,
+            uart_writer,
+            uart_reader,
             }, 
         init::Monotonics(monotonic)
         )
@@ -546,7 +545,7 @@ mod app {
         shared = [
             measurement, 
             pwm_ctr, pwm_lr, pwm_fb,
-            uart
+            //uart
             ],
         local = [
             toggle: bool = true, 
@@ -556,13 +555,12 @@ mod app {
             rtc,
             start_time,
             recipe,
-            //uart_writer,
-            
+            uart_writer,
             ],
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
 
-        (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb, c.shared.uart).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _, u| {
+        (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _| {
             
             // Get elapsed time
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
@@ -618,7 +616,7 @@ mod app {
             json_buf[buf_len] = 0x0a;   // Append newline 'char'
             //c.local.uart_writer.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
 
-            u.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
+            c.local.uart_writer.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
 
             info!("Sent bytes = {:?}, incl newline", buf_len+1);
         });
@@ -634,32 +632,32 @@ mod app {
      #[task(
         priority = 2, 
         binds = UART0_IRQ,  
-        shared = [uart, measurement],    //uart_reader
-        local = [buffer, msg_len],
+        shared = [measurement],    //uart_reader
+        local = [buffer, msg_len, uart_reader],
     )]
     fn uart_receive_task (c: uart_receive_task::Context) { 
-        let mut uart = c.shared.uart;        //c.shared.uart_reader;
+        let mut uart_reader = c.local.uart_reader;        //c.shared.uart_reader;
 
-        uart.lock(|u|{      // Lock the shared uart
-            while let Ok(byte) = u.read() {                 // Read bytes until none avail in FIFO
-                if byte != 0x0a {   // If byte is not a newline, 
-                    c.local.buffer[*c.local.msg_len] = byte;     // Accumulate byte into buffer
-                    *c.local.msg_len += 1;           // Increment the message length
-                } else {        // Otherwise, if we found a newline char...
-                    //let sslice = core::str::from_utf8(&c.local.buffer[0..*c.local.msg_len]).unwrap();   // Convert buffer to string slice for debug
-                    
-                    //info!("UI >> Controller Received Message {}", sslice);        // Print the msg contents
-                    let result: Result<(Command, usize), serde_json_core::de::Error> = serde_json_core::from_slice(&c.local.buffer[0..*c.local.msg_len]);
-                    if let Ok((command, _)) = result  {
-                        //info!("Parsed command object: {:?}, {:?}", command, byte_count);
-                        handle_command(command);
-                    } else {
-                        info!("Deserialize failed");
-                    }
-                    *c.local.msg_len = 0;    // reset the
+
+        while let Ok(byte) = uart_reader.read() {                 // Read bytes until none avail in FIFO
+            if byte != 0x0a {   // If byte is not a newline, 
+                c.local.buffer[*c.local.msg_len] = byte;     // Accumulate byte into buffer
+                *c.local.msg_len += 1;           // Increment the message length
+            } else {        // Otherwise, if we found a newline char...
+                //let sslice = core::str::from_utf8(&c.local.buffer[0..*c.local.msg_len]).unwrap();   // Convert buffer to string slice for debug
+                
+                //info!("UI >> Controller Received Message {}", sslice);        // Print the msg contents
+                let result: Result<(Command, usize), serde_json_core::de::Error> = serde_json_core::from_slice(&c.local.buffer[0..*c.local.msg_len]);
+                if let Ok((command, _)) = result  {
+                    //info!("Parsed command object: {:?}, {:?}", command, byte_count);
+                    handle_command(command);
+                } else {
+                    info!("Deserialize failed");
                 }
+                *c.local.msg_len = 0;    // reset the
             }
-        });
+        }
+
     }
 
     fn handle_command(command: Command) {
