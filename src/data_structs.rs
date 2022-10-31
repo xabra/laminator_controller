@@ -17,13 +17,16 @@ pub struct Measurement {
     pub duty_factor_ctr: f32,
     pub duty_factor_lr: f32,
     pub duty_factor_fb: f32,
+    pub power_on: bool,
 
     // Setpoints
+    pub power_on_sp: bool,
     pub temp_sp: f32,   // Current temp setpoint
     pub temp_trim_lr_sp: f32,
     pub temp_trim_fb_sp: f32,
     pub valve_state_chbr: ValveState,
     pub valve_state_bladder: ValveState,
+
     pub time_elapsed: u32, // Recipe elapsed time.
 
 }

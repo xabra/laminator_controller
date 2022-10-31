@@ -10,6 +10,7 @@ pub mod signal_processing;
 pub mod data_structs;
 pub mod time_util;
 pub mod recipe_manager;
+pub mod handle_command;
 
 use panic_halt as _;
 use defmt_rtt as _;
@@ -25,6 +26,7 @@ mod app {
 
     use core::fmt::Error;
 
+    //use data_structs::Measurement;
     use embedded_hal::digital::v2::OutputPin;
     use fugit::{MicrosDurationU32, MicrosDurationU64 ,RateExtU32};
     use defmt::*;
@@ -60,7 +62,7 @@ mod app {
     const TOP: u16 = 480;  // Ticks per period
 
     // Sample period for Alarm2.
-    const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(200_000);
+    const SAMPLE_TICK_US: MicrosDurationU32 = MicrosDurationU32::micros(50_000);
 
     // Control loop period
     const CONTROL_LOOP_TICK_MS: u64 = 1000;
@@ -71,8 +73,8 @@ mod app {
     const N_RECIPE_SETPOINTS: usize = 4;
 
     const UART_RX_BUF_MAX: usize = 80;
-    const UART_TX_BUF_MAX: usize = 450;
-    const UART_BAUDRATE: u32 = 57600;   // 28800, 57600, 115200
+    const UART_TX_BUF_MAX: usize = 500;
+    const UART_BAUDRATE: u32 = 57600;   // 28800, 57600, 115200 
 
     const P_ATM_THRESHOLD: f32 = -200.0;            // Pa.  Above this pressure is considered atmosphere
     const P_VACUUM_THRESHOLD: f32 = -100_000.0;     // Pa  Below this pressure is considered vacuum
@@ -100,7 +102,7 @@ mod app {
         // Sample measurement
         debug_pin: hal::gpio::Pin<Gpio8, hal::gpio::PushPullOutput>,
 
-        // Heater PWMs
+        // Heater PWMs - Shared with the PWM task and the main control loop task
         pwm_ctr: PWM<Gpio15>,
         pwm_lr: PWM<Gpio13>,
         pwm_fb: PWM<Gpio14>,
@@ -137,8 +139,8 @@ mod app {
         rtc: RealTimeClock,
         start_time: u32,
         recipe: Recipe::<N_RECIPE_SETPOINTS>,
-        msg_len: usize, // UART Receive message length
-        buffer: [u8; UART_RX_BUF_MAX], // Place to hold received bytes (should be in local or shared???)
+        uart_rx_msg_len: usize, // UART Receive message length
+        uart_rx_buffer: [u8; UART_RX_BUF_MAX], // Place to hold received bytes (should be in local or shared???)
         uart_writer: UartWriter,
         uart_reader: UartReader,
     }
@@ -218,8 +220,8 @@ mod app {
         let (mut uart_reader, uart_writer) = uart.split();
         uart_reader.enable_rx_interrupt();
 
-        let mut buffer = [0_u8; UART_RX_BUF_MAX];  // Place to hold received bytes (should be in local or shared???)
-        let mut msg_len = 0;        // Number of received bytes.  Should be in local or shared??
+        let uart_rx_buffer = [0_u8; UART_RX_BUF_MAX];  // Place to hold received bytes
+        let uart_rx_msg_len = 0;        // Number of received bytes.  
 
 
         // --------------- CREATE RECIPE --------------
@@ -300,7 +302,7 @@ mod app {
         let p_chamber_filter = MovingAverageFilter::<f32, 50>::new();
         let p_bladder_filter = MovingAverageFilter::<f32, 50>::new();
 
-        let measurement = Measurement {
+        let mut measurement = Measurement {
             temp_ctr: 0.0,
             temp_lr: 0.0,
             temp_fb: 0.0,   
@@ -313,8 +315,10 @@ mod app {
             duty_factor_ctr: 0.0,
             duty_factor_lr: 0.0,
             duty_factor_fb: 0.0,
+            power_on: false,
 
             // Setpoints
+            power_on_sp: true,
             temp_sp: 0.0,   // Current temp setpoint
             temp_trim_lr_sp: 1.0,
             temp_trim_fb_sp: 1.0,
@@ -372,8 +376,8 @@ mod app {
             rtc,
             start_time,
             recipe,
-            msg_len,
-            buffer,
+            uart_rx_msg_len,
+            uart_rx_buffer,
             uart_writer,
             uart_reader,
             }, 
@@ -559,6 +563,10 @@ mod app {
             // Get elapsed time
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
             let elapsed = now - *c.local.start_time;
+
+            // System 'power'
+            info!(">> Control Loop power on:  {:?}", m.power_on_sp);
+            m.power_on = m.power_on_sp; // Copy sp to pv
             
             // Get current setpoint from the recipe.  Interpolate setpoint temp
             let (sp, segment) = c.local.recipe.get_current_setpoint(elapsed);  
@@ -622,64 +630,31 @@ mod app {
         priority = 2, 
         binds = UART0_IRQ,  
         shared = [measurement],
-        local = [buffer, msg_len, uart_reader],
+        local = [uart_rx_buffer, uart_rx_msg_len, uart_reader],
     )]
-    fn uart_receive_task (c: uart_receive_task::Context) { 
+    fn uart_receive_task (mut c: uart_receive_task::Context) { 
         let uart_reader = c.local.uart_reader; 
 
 
         while let Ok(byte) = uart_reader.read() {                 // Read bytes until none avail in FIFO
             if byte != 0x0a {   // If byte is not a newline, 
-                c.local.buffer[*c.local.msg_len] = byte;     // Accumulate byte into buffer
-                *c.local.msg_len += 1;           // Increment the message length
+                c.local.uart_rx_buffer[*c.local.uart_rx_msg_len] = byte;     // Accumulate byte into buffer
+                *c.local.uart_rx_msg_len += 1;           // Increment the message length
             } else {        // Otherwise, if we found a newline char...
                 //let sslice = core::str::from_utf8(&c.local.buffer[0..*c.local.msg_len]).unwrap();   // Convert buffer to string slice for debug
                 
                 //info!("UI >> Controller Received Message {}", sslice);        // Print the msg contents
-                let result: Result<(Command, usize), serde_json_core::de::Error> = serde_json_core::from_slice(&c.local.buffer[0..*c.local.msg_len]);
+                let result: Result<(Command, usize), serde_json_core::de::Error> = serde_json_core::from_slice(&c.local.uart_rx_buffer[0..*c.local.uart_rx_msg_len]);
                 if let Ok((command, _)) = result  {
                     //info!("Parsed command object: {:?}, {:?}", command, byte_count);
-                    handle_command(command);
+                    c.shared.measurement.lock(|m| {crate::handle_command::handle_command(command, m);})
+                    
                 } else {
                     info!("Deserialize failed");
                 }
-                *c.local.msg_len = 0;    // reset the
+                *c.local.uart_rx_msg_len = 0;    // reset the
             }
         }
 
-    }
-
-    fn handle_command(command: Command) {
-        match command.cmd {
-            "set_temp" => {
-                let v = command.value.parse::<f32>().unwrap();
-                info!("Setting temp to: {:?}", v);
-            }
-            "set_heater_trim_lr" => {
-                let v = command.value.parse::<f32>().unwrap();
-                info!("Setting heater lr trim to: {:?}", v);
-            }
-            "set_heater_trim_fb" => {
-                let v = command.value.parse::<f32>().unwrap();
-                info!("Setting heater fb trim to: {:?}", v);
-            }
-            "set_valve_state_chbr" => {
-                info!("Setting chamber valve: {:?}", command.value);
-                match command.value {
-                    "Pump" => {},
-                    "Vent" => {},
-                    _ => {},
-                }
-            }
-            "set_valve_state_bladder" => {
-                info!("Setting bladder valve: {:?}", command.value);
-            }
-            "set_system_pwr" => {
-                info!("Setting power: {:?}", command.value);
-            }
-
-            // Default case
-            _ => {info!("No command found");}
-        }
     }
 }
