@@ -20,8 +20,8 @@ pub fn handle_command(command: Command, m: &mut Measurement) {
         "set_valve_state_chbr" => {
             info!("Setting chamber valve: {:?}", command.value);
             match command.value {
-                "Pump" => {m.valve_state_chbr = ValveState::Pump},
-                "Vent" => {m.valve_state_chbr = ValveState::Vent},
+                "Pump" => {m.vlv_ch = ValveState::Pump},
+                "Vent" => {m.vlv_ch = ValveState::Vent},
                 _ => {},
             }
         }
@@ -32,12 +32,12 @@ pub fn handle_command(command: Command, m: &mut Measurement) {
             info!("Setting power: {:?}", command.value);
             match command.value {
                 "on" => {
-                    m.power_on_sp = true;
-                    info!("Setting power: {:?}", m.power_on_sp);
+                    m.pwr_sp = true;
+                    info!("Setting power: {:?}", m.pwr_sp);
                 },
                 "off" => {
-                    m.power_on_sp = false;
-                    info!("Setting power: {:?}", m.power_on_sp);
+                    m.pwr_sp = false;
+                    info!("Setting power: {:?}", m.pwr_sp);
                 },
                 _ => {},
             }

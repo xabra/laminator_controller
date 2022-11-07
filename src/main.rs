@@ -11,6 +11,7 @@ pub mod data_structs;
 pub mod time_util;
 pub mod recipe_manager;
 pub mod handle_command;
+pub mod machine_mode;
 
 use panic_halt as _;
 use defmt_rtt as _;
@@ -54,6 +55,7 @@ mod app {
     use crate::signal_processing::{MovingAverageFilter, PIDController};
     use crate::data_structs::{Measurement, Command};
     use crate::recipe_manager::{SetPoint, VacuumSetpoint::{Vented, Evacuated}, Recipe};
+    use crate::machine_mode::MachineMode;
 
 
     // PWM cycle period.
@@ -73,7 +75,7 @@ mod app {
     const N_RECIPE_SETPOINTS: usize = 4;
 
     const UART_RX_BUF_MAX: usize = 80;
-    const UART_TX_BUF_MAX: usize = 500;
+    const UART_TX_BUF_MAX: usize = 600;
     const UART_BAUDRATE: u32 = 57600;   // 28800, 57600, 115200 
 
     const P_ATM_THRESHOLD: f32 = -200.0;            // Pa.  Above this pressure is considered atmosphere
@@ -303,28 +305,31 @@ mod app {
         let p_bladder_filter = MovingAverageFilter::<f32, 50>::new();
 
         let mut measurement = Measurement {
-            temp_ctr: 0.0,
-            temp_lr: 0.0,
-            temp_fb: 0.0,   
-            temp_avg: 0.0,
-            temp_err_ctr: TCError::NoTCError,
-            temp_err_lr: TCError::NoTCError,
-            temp_err_fb: TCError::NoTCError,
-            p_chamber: 0.0,
-            p_bladder: 0.0,
-            duty_factor_ctr: 0.0,
-            duty_factor_lr: 0.0,
-            duty_factor_fb: 0.0,
-            power_on: false,
+            tt_c: 0.0,
+            tt_l: 0.0,
+            tt_f: 0.0,   
+            tt_avg: 0.0,
+            tt_err_c: TCError::NoTCError,
+            tt_err_l: TCError::NoTCError,
+            tt_err_f: TCError::NoTCError,
+            p_ch: 0.0,
+            p_bl: 0.0,
+            df_c: 0.0,
+            df_l: 0.0,
+            df_f: 0.0,
+            pwr: false,
+            t_ela: 0, // Recipe elapsed time.
+            seg: 0,
+            t_rcp: 0,
+            mode: MachineMode::mode_stopped,
 
             // Setpoints
-            power_on_sp: true,
-            temp_sp: 0.0,   // Current temp setpoint
-            temp_trim_lr_sp: 1.0,
-            temp_trim_fb_sp: 1.0,
-            valve_state_chbr: ValveState::Pump,
-            valve_state_bladder: ValveState::Pump,
-            time_elapsed: 0, // Recipe elapsed time.
+            pwr_sp: true,
+            tt_sp: 0.0,   // Current temp setpoint
+            tt_trim_l_sp: 1.0,
+            tt_trim_f_sp: 1.0,
+            vlv_ch: ValveState::Pump,
+            vlv_bl: ValveState::Pump, 
         };
 
         // ----- PID Controller -----
@@ -514,15 +519,15 @@ mod app {
 
         // Lock shared.measurement and write data to shared measurements data structure
         (c.shared.measurement).lock(|m: _| {
-            m.temp_ctr = temp_ctr_filtered;
-            m.temp_lr = temp_lr_filtered;
-            m.temp_fb = temp_fb_filtered;
-            m.temp_avg = temp_avg_filtered;
-            m.temp_err_ctr = temp_err_ctr;
-            m.temp_err_lr = temp_err_lr;
-            m.temp_err_fb = temp_err_fb;
-            m.p_chamber = p_chamber_filtered;
-            m.p_bladder = p_bladder_filtered;
+            m.tt_c = temp_ctr_filtered;
+            m.tt_l = temp_lr_filtered;
+            m.tt_f = temp_fb_filtered;
+            m.tt_avg = temp_avg_filtered;
+            m.tt_err_c = temp_err_ctr;
+            m.tt_err_l = temp_err_lr;
+            m.tt_err_f = temp_err_fb;
+            m.p_ch = p_chamber_filtered;
+            m.p_bl = p_bladder_filtered;
         });
 
         // Debug pin for checking timing...
@@ -565,11 +570,12 @@ mod app {
             let elapsed = now - *c.local.start_time;
 
             // System 'power'
-            info!(">> Control Loop power on:  {:?}", m.power_on_sp);
-            m.power_on = m.power_on_sp; // Copy sp to pv
+            info!(">> Control Loop power on:  {:?}", m.pwr_sp);
+            m.pwr = m.pwr_sp; // Copy sp to pv
             
             // Get current setpoint from the recipe.  Interpolate setpoint temp
             let (sp, segment) = c.local.recipe.get_current_setpoint(elapsed);  
+            m.seg = segment;
 
             // Determine chamber pressure states (informational only)
             //let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
@@ -587,7 +593,7 @@ mod app {
             }
 
             // Get overall duty_factor from PID controller
-            let pwm_out: f32 =  c.local.pid_controller.update(m.temp_avg, sp.temp);
+            let pwm_out: f32 =  c.local.pid_controller.update(m.tt_avg, sp.temp);
 
             // Set the duty_factors for the 3 sets of heaters
             let temp_trim_lr_sp = 0.9;
@@ -598,16 +604,16 @@ mod app {
             pwm_ctr.set_duty_factor(df_ctr);
             pwm_lr.set_duty_factor(df_lr);
             pwm_fb.set_duty_factor(df_fb); 
-            m.duty_factor_ctr = df_ctr;
-            m.duty_factor_lr = df_lr;
-            m.duty_factor_fb = df_fb;
+            m.df_c = df_ctr;
+            m.df_l = df_lr;
+            m.df_f = df_fb;
 
-            m.temp_sp = sp.temp;   // Current temp setpoint
-            m.temp_trim_lr_sp = temp_trim_lr_sp;
-            m.temp_trim_fb_sp = temp_trim_fb_sp;
-            m.valve_state_chbr = ValveState::Pump;
-            m.valve_state_bladder = ValveState::Vent;
-            m.time_elapsed = elapsed; // Recipe elapsed time.
+            m.tt_sp = sp.temp;   // Current temp setpoint
+            m.tt_trim_l_sp = temp_trim_lr_sp;
+            m.tt_trim_f_sp = temp_trim_fb_sp;
+            m.vlv_ch = ValveState::Pump;
+            m.vlv_bl = ValveState::Vent;
+            m.t_ela = elapsed; // Recipe elapsed time.
 
             // ------------------ UART SEND ---------------
             let mut json_buf = [0_u8; UART_TX_BUF_MAX];     // Create oversized buffer to hold JSON string

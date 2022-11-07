@@ -1,34 +1,35 @@
-use crate::{thermocouple_controller::TCError, valve_controller::ValveState};
+use crate::{thermocouple_controller::TCError, valve_controller::ValveState, machine_mode::MachineMode};
 use serde::{Serialize, Deserialize};
 // use serde_json_core;
 use defmt_rtt as _;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct Measurement {
-    pub temp_ctr: f32,
-    pub temp_lr: f32,
-    pub temp_fb: f32, 
-    pub temp_avg: f32,
-    pub temp_err_ctr: TCError,
-    pub temp_err_lr: TCError,
-    pub temp_err_fb: TCError,  
-    pub p_chamber: f32,
-    pub p_bladder: f32,
-    pub duty_factor_ctr: f32,
-    pub duty_factor_lr: f32,
-    pub duty_factor_fb: f32,
-    pub power_on: bool,
+    pub tt_c: f32,
+    pub tt_l: f32,
+    pub tt_f: f32, 
+    pub tt_avg: f32,
+    pub tt_err_c: TCError,
+    pub tt_err_l: TCError,
+    pub tt_err_f: TCError,  
+    pub p_ch: f32,
+    pub p_bl: f32,
+    pub df_c: f32,
+    pub df_l: f32,
+    pub df_f: f32,
+    pub pwr: bool,
+    pub t_ela: u32, // Recipe elapsed time.
+    pub t_rcp: u32,
+    pub seg: usize,
+    pub mode: MachineMode,
 
     // Setpoints
-    pub power_on_sp: bool,
-    pub temp_sp: f32,   // Current temp setpoint
-    pub temp_trim_lr_sp: f32,
-    pub temp_trim_fb_sp: f32,
-    pub valve_state_chbr: ValveState,
-    pub valve_state_bladder: ValveState,
-
-    pub time_elapsed: u32, // Recipe elapsed time.
-
+    pub pwr_sp: bool,
+    pub tt_sp: f32,   // Current temp setpoint
+    pub tt_trim_l_sp: f32,
+    pub tt_trim_f_sp: f32,
+    pub vlv_ch: ValveState,
+    pub vlv_bl: ValveState,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, defmt::Format)]
