@@ -14,15 +14,18 @@ pub struct SetPoint {
     pub p_bladder: VacuumSetpoint,
 }
 
-
 pub struct Recipe<const N: usize> {
     pub setpoints:  [SetPoint; N],
+    pub t_recipe: u32,
+    pub is_running: bool,
 }
 
 impl<const N: usize> Recipe<N> {
     pub fn new(setpoints: [SetPoint; N]) -> Self {
         Self {
             setpoints,
+            t_recipe: 0_u32,
+            is_running: false,
         }
     }
 
@@ -31,11 +34,40 @@ impl<const N: usize> Recipe<N> {
             info!("SetPoint {:?}, sp_time = {:?}, sp_temp = {:?}", i, sp.t, sp.temp);
         }
     }
-
-    pub fn get_current_setpoint(&self, t: u32) -> (SetPoint, usize) {
+    pub fn recipe_current_time(&self) -> u32 {
+        self.t_recipe
+    }
+    pub fn reset(&mut self) {
+        self.t_recipe = 0;
+    }
+    pub fn start(&mut self) {
+        self.is_running = true;
+    }
+    pub fn stop(&mut self) {
+        self.is_running = false;
+    }
+    pub fn is_running(&self) -> bool{
+        self.is_running
+    }
+    pub fn recipe_end_time(&self) -> u32{
         let n = self.setpoints.len();
+        self.setpoints[n-1].t   // return the time of the last recipe point.
+    }
+    pub fn update(&mut self) {
+        if self.is_running() {  // If it is running...
+            if self.recipe_current_time()>= self.recipe_end_time() {    // If we've run off the end of the recipe...
+                self.stop();        // Stop recipe
+            } else {
+                self.t_recipe += 1; // TODO this is not right. It should be related to the loop cycle time/elapsed time, not fixed at 1 sec.
+            }   
+        }
+    }
+
+    pub fn get_current_setpoint(&self) -> (SetPoint, usize) {
+        let n = self.setpoints.len();
+        let t = self.recipe_current_time();
         if t < self.setpoints[0].t {return (self.setpoints[0], 0);}      // Before the first setpoint? return first sp
-        if t>= self.setpoints[n-1].t {return (self.setpoints[n-1], n-1);}      // After or equal to the last setpoint? return last sp
+        if t>= self.recipe_end_time() {return (self.setpoints[n-1], n-1);}      // After or equal to the last setpoint? return last sp
 
         // Otherwise, scan setpoints up to penultimate setpoint..
         let mut i_segment: usize = 0;
