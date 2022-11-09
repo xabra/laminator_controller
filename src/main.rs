@@ -11,7 +11,7 @@ pub mod data_structs;
 pub mod time_util;
 pub mod recipe_manager;
 pub mod handle_command;
-pub mod machine_mode;
+//pub mod machine_mode;
 
 use panic_halt as _;
 use defmt_rtt as _;
@@ -55,7 +55,7 @@ mod app {
     use crate::signal_processing::{MovingAverageFilter, PIDController};
     use crate::data_structs::{Measurement, Command};
     use crate::recipe_manager::{SetPoint, VacuumSetpoint::{Vented, Evacuated}, Recipe};
-    use crate::machine_mode::MachineMode;
+    //use crate::machine_mode::MachineMode;
 
 
     // PWM cycle period.
@@ -72,7 +72,7 @@ mod app {
     // Length of the low pass averaging filter
     const FILTER_LENGTH: usize = 50;
 
-    const N_RECIPE_SETPOINTS: usize = 4;
+    pub const N_RECIPE_SETPOINTS: usize = 4;
 
     const UART_RX_BUF_MAX: usize = 80;
     const UART_TX_BUF_MAX: usize = 600;
@@ -111,6 +111,8 @@ mod app {
 
         // Measurement data
         measurement: Measurement,
+        recipe: Recipe::<N_RECIPE_SETPOINTS>,
+
     }
 
     // ----------------------------------------------------------------
@@ -140,7 +142,7 @@ mod app {
         pid_controller: PIDController,
         rtc: RealTimeClock,
         start_time: u32,
-        recipe: Recipe::<N_RECIPE_SETPOINTS>,
+        //recipe: Recipe::<N_RECIPE_SETPOINTS>,
         uart_rx_msg_len: usize, // UART Receive message length
         uart_rx_buffer: [u8; UART_RX_BUF_MAX], // Place to hold received bytes (should be in local or shared???)
         uart_writer: UartWriter,
@@ -235,7 +237,7 @@ mod app {
         SetPoint{t:120, temp: 10.0, p_chamber: Vented, p_bladder: Evacuated},
         ];
 
-        let recipe = Recipe::<N_RECIPE_SETPOINTS>::new(RECIPE_ARRAY);
+        let recipe = Recipe::<N_RECIPE_SETPOINTS>::new(RECIPE_ARRAY);// new sets the recipe time to 0 and is_running to false
         recipe.list_setpoints();
 
         
@@ -321,14 +323,13 @@ mod app {
             t_ela: 0, // Recipe elapsed time.
             seg: 0,
             t_rcp: 0,
-            mode: MachineMode::mode_stopped,
+            isrun: false,       // Recipe is running.
 
             // Setpoints
-            pwr_sp: true,
             tt_sp: 0.0,   // Current temp setpoint
             tt_trim_l_sp: 1.0,
             tt_trim_f_sp: 1.0,
-            vlv_ch: ValveState::Pump,
+            vlv_ch: ValveState::Pump,   // Owned by valve controllers
             vlv_bl: ValveState::Pump, 
         };
 
@@ -362,6 +363,7 @@ mod app {
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
             measurement,
+            recipe,
             }, 
         Local {
             alarm1,
@@ -380,7 +382,7 @@ mod app {
             pid_controller,
             rtc,
             start_time,
-            recipe,
+            //recipe,
             uart_rx_msg_len,
             uart_rx_buffer,
             uart_writer,
@@ -549,6 +551,7 @@ mod app {
         shared = [
             measurement, 
             pwm_ctr, pwm_lr, pwm_fb,
+            recipe,
             ],
         local = [
             toggle: bool = true, 
@@ -557,29 +560,25 @@ mod app {
             pid_controller,
             rtc,
             start_time,
-            recipe,
+            //recipe,
             uart_writer,
             ],
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
 
-        (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _| {
+        (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb, c.shared.recipe).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _, r: _| {
             
-            // Get elapsed time
+            // Get elapsed time since power on
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
             let elapsed = now - *c.local.start_time;
-
-            // System 'power'
-            info!(">> Control Loop power on:  {:?}", m.pwr_sp);
-            m.pwr = m.pwr_sp; // Copy sp to pv
             
-            // Get current setpoint from the recipe.  Interpolate setpoint temp
-            let (sp, segment) = c.local.recipe.get_current_setpoint(elapsed);  
-            m.seg = segment;
+            m.isrun = r.is_running(); // Copy recipe manager running state to pv variables for the UI
 
-            // Determine chamber pressure states (informational only)
-            //let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
-            //let ps_bladder: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
+
+            r.update(); // Update the recipe output: eg time and setpoints
+            m.t_rcp = r.recipe_current_time(); // Put the current recipe time in the data struct
+            let (sp, segment) = r.get_current_setpoint();  
+            m.seg = segment;
 
             // Set the valves per the setpoints for each chamber
             match sp.p_chamber {
@@ -591,16 +590,19 @@ mod app {
                 Evacuated => {c.local.bladder_valve.set_valve_state(ValveState::Pump);}
                 Vented => {c.local.bladder_valve.set_valve_state(ValveState::Vent);}
             }
+        
 
+            // Determine chamber pressure states (informational only)
+            //let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
+            //let ps_bladder: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
+            
             // Get overall duty_factor from PID controller
             let pwm_out: f32 =  c.local.pid_controller.update(m.tt_avg, sp.temp);
 
             // Set the duty_factors for the 3 sets of heaters
-            let temp_trim_lr_sp = 0.9;
-            let temp_trim_fb_sp = 0.95;
             let df_ctr = pwm_out;
-            let df_lr = pwm_out*temp_trim_lr_sp;
-            let df_fb = pwm_out*0.95;
+            let df_lr = pwm_out*m.tt_trim_l_sp;
+            let df_fb = pwm_out*m.tt_trim_f_sp;
             pwm_ctr.set_duty_factor(df_ctr);
             pwm_lr.set_duty_factor(df_lr);
             pwm_fb.set_duty_factor(df_fb); 
@@ -609,8 +611,6 @@ mod app {
             m.df_f = df_fb;
 
             m.tt_sp = sp.temp;   // Current temp setpoint
-            m.tt_trim_l_sp = temp_trim_lr_sp;
-            m.tt_trim_f_sp = temp_trim_fb_sp;
             m.vlv_ch = ValveState::Pump;
             m.vlv_bl = ValveState::Vent;
             m.t_ela = elapsed; // Recipe elapsed time.
@@ -635,12 +635,14 @@ mod app {
      #[task(
         priority = 2, 
         binds = UART0_IRQ,  
-        shared = [measurement],
+        shared = [measurement, recipe],
         local = [uart_rx_buffer, uart_rx_msg_len, uart_reader],
     )]
-    fn uart_receive_task (mut c: uart_receive_task::Context) { 
+    fn uart_receive_task (c: uart_receive_task::Context) { 
         let uart_reader = c.local.uart_reader; 
 
+        let mut cm = c.shared.measurement;
+        let mut rec = c.shared.recipe;
 
         while let Ok(byte) = uart_reader.read() {                 // Read bytes until none avail in FIFO
             if byte != 0x0a {   // If byte is not a newline, 
@@ -653,12 +655,16 @@ mod app {
                 let result: Result<(Command, usize), serde_json_core::de::Error> = serde_json_core::from_slice(&c.local.uart_rx_buffer[0..*c.local.uart_rx_msg_len]);
                 if let Ok((command, _)) = result  {
                     //info!("Parsed command object: {:?}, {:?}", command, byte_count);
-                    c.shared.measurement.lock(|m| {crate::handle_command::handle_command(command, m);})
+                    cm.lock(|m| {       // Dont understand why I couldnt lock multiple variables with a tuple...??
+                        rec.lock(|r| {
+                            crate::handle_command::handle_command(command, m, r);
+                        });
+                    })
                     
                 } else {
                     info!("Deserialize failed");
                 }
-                *c.local.uart_rx_msg_len = 0;    // reset the
+                *c.local.uart_rx_msg_len = 0;    // reset the message length counter
             }
         }
 

@@ -40,11 +40,14 @@ impl<const N: usize> Recipe<N> {
     pub fn reset(&mut self) {
         self.t_recipe = 0;
     }
-    pub fn start(&mut self) {
-        self.is_running = true;
-    }
-    pub fn stop(&mut self) {
-        self.is_running = false;
+
+    // Start or stop the recipe
+    pub fn run(&mut self, on: bool) {
+        if self.is_running != on {  // If it changed state...
+            if on == true {self.reset();}   // If new state is 'running' then reset the timer
+            self.is_running = on;   // Update internal state
+        }
+        
     }
     pub fn is_running(&self) -> bool{
         self.is_running
@@ -56,7 +59,7 @@ impl<const N: usize> Recipe<N> {
     pub fn update(&mut self) {
         if self.is_running() {  // If it is running...
             if self.recipe_current_time()>= self.recipe_end_time() {    // If we've run off the end of the recipe...
-                self.stop();        // Stop recipe
+                self.run(false);        // Stop recipe
             } else {
                 self.t_recipe += 1; // TODO this is not right. It should be related to the loop cycle time/elapsed time, not fixed at 1 sec.
             }   

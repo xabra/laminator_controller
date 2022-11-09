@@ -1,9 +1,10 @@
-use crate::{data_structs::{Command, Measurement}, valve_controller::ValveState};
+use crate::{data_structs::{Command, Measurement}, valve_controller::ValveState, recipe_manager::Recipe};
+use crate::app::N_RECIPE_SETPOINTS;
 use defmt_rtt as _;
 use defmt::*;
 
 
-pub fn handle_command(command: Command, m: &mut Measurement) {
+pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RECIPE_SETPOINTS>) {
     match command.cmd {
         "set_temp" => {
             let v = command.value.parse::<f32>().unwrap();
@@ -11,10 +12,12 @@ pub fn handle_command(command: Command, m: &mut Measurement) {
         }
         "set_heater_trim_lr" => {
             let v = command.value.parse::<f32>().unwrap();
+            m.tt_trim_l_sp = v;
             info!("Setting heater lr trim to: {:?}", v);
         }
         "set_heater_trim_fb" => {
             let v = command.value.parse::<f32>().unwrap();
+            m.tt_trim_f_sp = v;
             info!("Setting heater fb trim to: {:?}", v);
         }
         "set_valve_state_chbr" => {
@@ -28,16 +31,41 @@ pub fn handle_command(command: Command, m: &mut Measurement) {
         "set_valve_state_bladder" => {
             info!("Setting bladder valve: {:?}", command.value);
         }
+        "recipe" => {
+            match command.value {
+                "start" => {
+                    if r.is_running() == false {
+                        r.reset();
+                        r.run(true);
+                        info!("Recipe Start");
+                    }
+                },
+                "stop" => {
+                    if r.is_running() == true {
+                        r.run(false);
+                        info!("Recipe Stop");
+                    }
+                },
+                _ => {},
+            }
+            
+        }
+        // --- POWER ON/OFF
         "set_system_pwr" => {
-            info!("Setting power: {:?}", command.value);
             match command.value {
                 "on" => {
-                    m.pwr_sp = true;
-                    info!("Setting power: {:?}", m.pwr_sp);
+                    if m.pwr == false {
+                        m.pwr = true;
+                        // TODO Initialize everything here for full restart....
+                        info!("Setting power: {:?}", m.pwr);
+                    }
                 },
                 "off" => {
-                    m.pwr_sp = false;
-                    info!("Setting power: {:?}", m.pwr_sp);
+                    if m.pwr == true {
+                        m.pwr = false;
+                        // TODO clear everything neede here for safe 'shutdown'
+                        info!("Setting power: {:?}", m.pwr);    
+                    }
                 },
                 _ => {},
             }
