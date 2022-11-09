@@ -30,7 +30,7 @@ pub struct Measurement {
     pub pwr: bool,      // Input from UI
 
     // Setpoints
-    pub tt_sp_in: f32,   // From recipe if running, otherwise input from UI
+    pub tt_sp_in: f32,   // Input from UI
     pub tt_trim_l_sp: f32,  // Input from UI
     pub tt_trim_f_sp: f32,  // Input from UI
 }
