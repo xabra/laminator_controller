@@ -6,42 +6,60 @@ use defmt::*;
 
 pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RECIPE_SETPOINTS>) {
     match command.cmd {
+        // --- TEMP SETPOINT
         "set_temp" => {
             let v = command.value.parse::<f32>().unwrap();
-            info!("Setting temp to: {:?}", v);
+            m.tt_sp_in = v;
+            info!("Setting temp to: {:?}", v);    
         }
+        // --- HEATER TRIM SETPOINTS
         "set_heater_trim_lr" => {
+            // This input works even if a recipe is running
             let v = command.value.parse::<f32>().unwrap();
             m.tt_trim_l_sp = v;
             info!("Setting heater lr trim to: {:?}", v);
         }
         "set_heater_trim_fb" => {
+            // This input works even if a recipe is running
             let v = command.value.parse::<f32>().unwrap();
             m.tt_trim_f_sp = v;
             info!("Setting heater fb trim to: {:?}", v);
         }
+
+        // --- VALVE STATE INPUTS
         "set_valve_state_chbr" => {
-            info!("Setting chamber valve: {:?}", command.value);
-            match command.value {
-                "Pump" => {m.vlv_ch = ValveState::Pump},
-                "Vent" => {m.vlv_ch = ValveState::Vent},
-                _ => {},
+            if !r.is_running() {        // Only works if NOT running a recipe
+                info!("Setting chamber valve: {:?}", command.value);
+                match command.value {
+                    "Pump" => {m.vlv_ch = ValveState::Pump},
+                    "Vent" => {m.vlv_ch = ValveState::Vent},
+                    _ => {},
+                }
             }
         }
         "set_valve_state_bladder" => {
-            info!("Setting bladder valve: {:?}", command.value);
+            if !r.is_running() {     // Only works if NOT running a recipe
+                info!("Setting bladder valve: {:?}", command.value);
+                match command.value {
+                    "Pump" => {m.vlv_bl = ValveState::Pump},
+                    "Vent" => {m.vlv_bl = ValveState::Vent},
+                    _ => {},
+                }    
+            }
         }
+
+        // --- START/STOP RECIPE 
         "recipe" => {
             match command.value {
                 "start" => {
-                    if r.is_running() == false {
+                    if !r.is_running() {
                         r.reset();
                         r.run(true);
                         info!("Recipe Start");
                     }
                 },
                 "stop" => {
-                    if r.is_running() == true {
+                    if r.is_running() {
                         r.run(false);
                         info!("Recipe Stop");
                     }
@@ -50,18 +68,19 @@ pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RE
             }
             
         }
+
         // --- POWER ON/OFF
         "set_system_pwr" => {
             match command.value {
                 "on" => {
-                    if m.pwr == false {
+                    if !m.pwr  {
                         m.pwr = true;
                         // TODO Initialize everything here for full restart....
                         info!("Setting power: {:?}", m.pwr);
                     }
                 },
                 "off" => {
-                    if m.pwr == true {
+                    if m.pwr {
                         m.pwr = false;
                         // TODO clear everything neede here for safe 'shutdown'
                         info!("Setting power: {:?}", m.pwr);    
@@ -71,7 +90,7 @@ pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RE
             }
         }
 
-        // Default case
+        // --- Default case
         _ => {info!("No command found");}
     }
 }

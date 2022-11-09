@@ -311,6 +311,8 @@ mod app {
             tt_l: 0.0,
             tt_f: 0.0,   
             tt_avg: 0.0,
+            tt_sp: 0.0,   // Current temp setpoint
+            tt_delta: 0.0,
             tt_err_c: TCError::NoTCError,
             tt_err_l: TCError::NoTCError,
             tt_err_f: TCError::NoTCError,
@@ -326,7 +328,7 @@ mod app {
             isrun: false,       // Recipe is running.
 
             // Setpoints
-            tt_sp: 0.0,   // Current temp setpoint
+            tt_sp_in: 0.0,   // Current temp setpoint
             tt_trim_l_sp: 1.0,
             tt_trim_f_sp: 1.0,
             vlv_ch: ValveState::Pump,   // Owned by valve controllers
@@ -596,8 +598,11 @@ mod app {
             //let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
             //let ps_bladder: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
             
+            // If running, use the temp sp from the recipe, otherwise use the UI input sp temp.
+            let sp = if r.is_running() {sp.temp} else {m.tt_sp_in};
+
             // Get overall duty_factor from PID controller
-            let pwm_out: f32 =  c.local.pid_controller.update(m.tt_avg, sp.temp);
+            let pwm_out: f32 =  c.local.pid_controller.update(m.tt_avg, sp);
 
             // Set the duty_factors for the 3 sets of heaters
             let df_ctr = pwm_out;
@@ -610,7 +615,8 @@ mod app {
             m.df_l = df_lr;
             m.df_f = df_fb;
 
-            m.tt_sp = sp.temp;   // Current temp setpoint
+            m.tt_sp = sp;   // Current temp setpoint output to UI
+            m.tt_delta = sp-m.tt_avg;  // Current temp delta (error)
             m.vlv_ch = ValveState::Pump;
             m.vlv_bl = ValveState::Vent;
             m.t_ela = elapsed; // Recipe elapsed time.

@@ -11,6 +11,8 @@ pub struct Measurement {
     pub tt_l: f32,
     pub tt_f: f32, 
     pub tt_avg: f32,
+    pub tt_sp: f32,
+    pub tt_delta: f32,
     pub tt_err_c: TCError,
     pub tt_err_l: TCError,
     pub tt_err_f: TCError,  
@@ -28,10 +30,11 @@ pub struct Measurement {
     pub pwr: bool,      // Input from UI
 
     // Setpoints
-    pub tt_sp: f32,   // From recipe if running, otherwise input from UI
+    pub tt_sp_in: f32,   // From recipe if running, otherwise input from UI
     pub tt_trim_l_sp: f32,  // Input from UI
     pub tt_trim_f_sp: f32,  // Input from UI
 }
+
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, defmt::Format)]
 pub struct Command<'a> {
