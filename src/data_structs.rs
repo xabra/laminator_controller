@@ -29,10 +29,12 @@ pub struct Measurement {
     pub isrun: bool,    // Owned by recipe mgr
     pub pwr: bool,      // Input from UI
 
-    // Setpoints
+    // User input requested-- not needed in the struct- not need to send to UI
     pub tt_sp_in: f32,   // Input from UI
     pub tt_trim_l_sp: f32,  // Input from UI
     pub tt_trim_f_sp: f32,  // Input from UI
+    pub vlv_ch_in: ValveState,
+    pub vlv_bl_in: ValveState,
 }
 
 

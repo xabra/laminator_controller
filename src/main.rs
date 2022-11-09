@@ -137,7 +137,7 @@ mod app {
         p_chamber_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         p_bladder_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         // Valves
-        main_chamber_valve: ValveController<Gpio12>,
+        chamber_valve: ValveController<Gpio12>,
         bladder_valve: ValveController<Gpio11>,
         pid_controller: PIDController,
         rtc: RealTimeClock,
@@ -253,8 +253,8 @@ mod app {
 
         // ----------- VALVE CONTROLLER SETUP ------------
         // Create the valve controllers and initialize them. Need to check logic polarity
-        let mut main_chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output()); //, P_ATM_THRESHOLD, P_VACUUM_THRESHOLD
-        main_chamber_valve.set_valve_state(ValveState::Pump);
+        let mut chamber_valve = ValveController::new(pins.gpio12.into_push_pull_output()); //, P_ATM_THRESHOLD, P_VACUUM_THRESHOLD
+        chamber_valve.set_valve_state(ValveState::Pump);
         let mut bladder_valve = ValveController::new(pins.gpio11.into_push_pull_output());  // , P_ATM_THRESHOLD, P_VACUUM_THRESHOLD
         bladder_valve.set_valve_state(ValveState::Pump);
 
@@ -321,6 +321,8 @@ mod app {
             df_c: 0.0,
             df_l: 0.0,
             df_f: 0.0,
+            vlv_ch: ValveState::Pump,   // Owned by valve controllers
+            vlv_bl: ValveState::Pump, 
             pwr: false,
             t_ela: 0, // Recipe elapsed time.
             seg: 0,
@@ -331,8 +333,8 @@ mod app {
             tt_sp_in: 0.0,   // Current temp setpoint
             tt_trim_l_sp: 1.0,
             tt_trim_f_sp: 1.0,
-            vlv_ch: ValveState::Pump,   // Owned by valve controllers
-            vlv_bl: ValveState::Pump, 
+            vlv_ch_in: ValveState::Pump,
+            vlv_bl_in: ValveState::Pump,
         };
 
         // ----- PID Controller -----
@@ -379,7 +381,7 @@ mod app {
             p_chamber_filter,
             p_bladder_filter,
             // Valves
-            main_chamber_valve,
+            chamber_valve,
             bladder_valve,
             pid_controller,
             rtc,
@@ -557,12 +559,11 @@ mod app {
             ],
         local = [
             toggle: bool = true, 
-            main_chamber_valve, 
+            chamber_valve, 
             bladder_valve, 
             pid_controller,
             rtc,
             start_time,
-            //recipe,
             uart_writer,
             ],
     )]
@@ -584,8 +585,8 @@ mod app {
 
             // Set the valves per the setpoints for each chamber
             match sp.p_chamber {
-                Evacuated => {c.local.main_chamber_valve.set_valve_state(ValveState::Pump);}
-                Vented => {c.local.main_chamber_valve.set_valve_state(ValveState::Vent);}
+                Evacuated => {c.local.chamber_valve.set_valve_state(ValveState::Pump);}
+                Vented => {c.local.chamber_valve.set_valve_state(ValveState::Vent);}
             }
 
             match sp.p_bladder {
@@ -595,8 +596,8 @@ mod app {
         
 
             // Determine chamber pressure states (informational only)
-            //let ps_chbr: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
-            //let ps_bladder: PressureState = c.local.main_chamber_valve.get_pressure_state(m.p_chamber);
+            //let ps_chbr: PressureState = c.local.chamber_valve.get_pressure_state(m.p_chamber);
+            //let ps_bladder: PressureState = c.local.chamber_valve.get_pressure_state(m.p_chamber);
             
             // If running, use the temp sp from the recipe, otherwise use the UI input sp temp.
             let sp = if r.is_running() {sp.temp} else {m.tt_sp_in};
@@ -617,8 +618,8 @@ mod app {
 
             m.tt_sp = sp;   // Current temp setpoint output to UI
             m.tt_delta = sp-m.tt_avg;  // Current temp delta (error)
-            m.vlv_ch = ValveState::Pump;
-            m.vlv_bl = ValveState::Vent;
+            m.vlv_ch = c.local.chamber_valve.get_valve_state();
+            m.vlv_bl = c.local.bladder_valve.get_valve_state();
             m.t_ela = elapsed; // Recipe elapsed time.
 
             // ------------------ UART SEND ---------------

@@ -28,21 +28,19 @@ pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RE
 
         // --- VALVE STATE INPUTS
         "set_valve_state_chbr" => {
-            if !r.is_running() {        // Only works if NOT running a recipe
-                info!("Setting chamber valve: {:?}", command.value);
-                match command.value {
-                    "Pump" => {m.vlv_ch = ValveState::Pump},
-                    "Vent" => {m.vlv_ch = ValveState::Vent},
-                    _ => {},
-                }
+            info!("Setting chamber valve: {:?}", command.value);
+            match command.value {
+                "Pump" => {m.vlv_ch_in = ValveState::Pump},
+                "Vent" => {m.vlv_ch_in = ValveState::Vent},
+                _ => {},
             }
         }
         "set_valve_state_bladder" => {
             if !r.is_running() {     // Only works if NOT running a recipe
                 info!("Setting bladder valve: {:?}", command.value);
                 match command.value {
-                    "Pump" => {m.vlv_bl = ValveState::Pump},
-                    "Vent" => {m.vlv_bl = ValveState::Vent},
+                    "Pump" => {m.vlv_bl_in = ValveState::Pump},
+                    "Vent" => {m.vlv_bl_in = ValveState::Vent},
                     _ => {},
                 }    
             }
