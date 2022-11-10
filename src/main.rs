@@ -574,36 +574,38 @@ mod app {
             // Get elapsed time since power on
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
             let elapsed = now - *c.local.start_time;
-            
-            m.isrun = r.is_running(); // Copy recipe manager running state to pv variables for the UI
 
+            let sp: SetPoint;
+            let setpoint_temp;
 
-            r.update(); // Update the recipe output: eg time and setpoints
-            m.t_rcp = r.recipe_current_time(); // Put the current recipe time in the data struct
-            let (sp, segment) = r.get_current_setpoint();  
-            m.seg = segment;
+            if r.is_running() {     // If recipe is running...
+                r.update(); // Update the recipe setpoints, if running. TODO: combine into one fn?
+                (sp, m.seg) = r.get_current_setpoint();  
+                setpoint_temp = sp.temp; // Get setpoint temp from recipe.
 
-            // Set the valves per the setpoints for each chamber
-            match sp.p_chamber {
-                Evacuated => {c.local.chamber_valve.set_valve_state(ValveState::Pump);}
-                Vented => {c.local.chamber_valve.set_valve_state(ValveState::Vent);}
+                // Set the valves per the setpoints for each chamber
+                match sp.p_chamber {
+                    Evacuated => {c.local.chamber_valve.set_valve_state(ValveState::Pump);}
+                    Vented => {c.local.chamber_valve.set_valve_state(ValveState::Vent);}
+                }
+
+                match sp.p_bladder {
+                    Evacuated => {c.local.bladder_valve.set_valve_state(ValveState::Pump);}
+                    Vented => {c.local.bladder_valve.set_valve_state(ValveState::Vent);}
+                }
+            } else{     // Not running, manual mode....
+                setpoint_temp = m.tt_sp_in;     // Get setpoint temp from user input.
+                c.local.bladder_valve.set_valve_state(m.vlv_ch_in);
+                c.local.chamber_valve.set_valve_state(m.vlv_bl_in);
             }
 
-            match sp.p_bladder {
-                Evacuated => {c.local.bladder_valve.set_valve_state(ValveState::Pump);}
-                Vented => {c.local.bladder_valve.set_valve_state(ValveState::Vent);}
-            }
-        
+            // Get overall duty_factor from PID controller
+            let pwm_out: f32 =  c.local.pid_controller.update(m.tt_avg, setpoint_temp);        
 
             // Determine chamber pressure states (informational only)
             //let ps_chbr: PressureState = c.local.chamber_valve.get_pressure_state(m.p_chamber);
             //let ps_bladder: PressureState = c.local.chamber_valve.get_pressure_state(m.p_chamber);
-            
-            // If running, use the temp sp from the recipe, otherwise use the UI input sp temp.
-            let sp = if r.is_running() {sp.temp} else {m.tt_sp_in};
-
-            // Get overall duty_factor from PID controller
-            let pwm_out: f32 =  c.local.pid_controller.update(m.tt_avg, sp);
+        
 
             // Set the duty_factors for the 3 sets of heaters
             let df_ctr = pwm_out;
@@ -612,15 +614,18 @@ mod app {
             pwm_ctr.set_duty_factor(df_ctr);
             pwm_lr.set_duty_factor(df_lr);
             pwm_fb.set_duty_factor(df_fb); 
-            m.df_c = df_ctr;
-            m.df_l = df_lr;
-            m.df_f = df_fb;
 
-            m.tt_sp = sp;   // Current temp setpoint output to UI
-            m.tt_delta = sp-m.tt_avg;  // Current temp delta (error)
+            //  --- FILL IN STRUCT VALUES TO SEND TO UI
+            m.t_rcp = r.recipe_current_time(); // Put the current recipe time in the data struct
+            m.isrun = r.is_running(); // Copy recipe manager running state to pv variables for the UI
+            m.tt_sp = setpoint_temp;   // Current temp setpoint output to UI
+            m.tt_delta = setpoint_temp-m.tt_avg;  // Current temp delta (error)
             m.vlv_ch = c.local.chamber_valve.get_valve_state();
             m.vlv_bl = c.local.bladder_valve.get_valve_state();
             m.t_ela = elapsed; // Recipe elapsed time.
+            m.df_c = df_ctr;
+            m.df_l = df_lr;
+            m.df_f = df_fb;
 
             // ------------------ UART SEND ---------------
             let mut json_buf = [0_u8; UART_TX_BUF_MAX];     // Create oversized buffer to hold JSON string
