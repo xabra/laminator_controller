@@ -5,8 +5,7 @@ use defmt_rtt as _;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct Measurement {
-    // Measurements, PVs, internal state
-    // Sent to UI Pico.
+    // Pure OUTPUTS to UI .
     pub tt_c: f32,
     pub tt_l: f32,
     pub tt_f: f32, 
@@ -27,14 +26,14 @@ pub struct Measurement {
     pub t_rcp: u32,     // Owned by recipe mgr. Recipe elapsed time.
     pub seg: usize,     // Owned by recipe mgr.
     pub isrun: bool,    // Owned by recipe mgr
-    pub pwr: bool,      // Input from UI
+    pub pwr: bool,      // Input from UI, Output to UI
 
-    // User input requested-- not needed in the struct- not need to send to UI
-    pub tt_sp_in: f32,   // Input from UI
-    pub tt_trim_l_sp: f32,  // Input from UI
-    pub tt_trim_f_sp: f32,  // Input from UI
-    pub vlv_ch_in: ValveState,
-    pub vlv_bl_in: ValveState,
+    // Pure user INPUTS from UI -- TODO not needed in this struct- not need to send to UI
+    pub tt_sp_in: f32,         // Input from UI
+    pub tt_trim_l_sp: f32,     // Input from UI
+    pub tt_trim_f_sp: f32,     // Input from UI
+    pub vlv_ch_in: ValveState, // Input from UI
+    pub vlv_bl_in: ValveState, // Input from UI
 }
 
 

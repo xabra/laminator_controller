@@ -548,7 +548,7 @@ mod app {
     }
 
     // ----------------------------------------------------------------
-    // ------- CONTROL LOOP TASK 
+    // ------- MAIN CONTROL LOOP TASK 
     // ----------------------------------------------------------------
     #[task(
         priority = 1, 
@@ -595,8 +595,8 @@ mod app {
                 }
             } else{     // Not running, manual mode....
                 setpoint_temp = m.tt_sp_in;     // Get setpoint temp from user input.
-                c.local.bladder_valve.set_valve_state(m.vlv_ch_in);
-                c.local.chamber_valve.set_valve_state(m.vlv_bl_in);
+                c.local.bladder_valve.set_valve_state(m.vlv_bl_in);
+                c.local.chamber_valve.set_valve_state(m.vlv_ch_in);
             }
 
             // Get overall duty_factor from PID controller
