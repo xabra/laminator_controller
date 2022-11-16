@@ -329,12 +329,13 @@ mod app {
             t_rcp: 0,
             isrun: false,       // Recipe is running.
 
-            // Setpoints
+            // Setpoints/Inputs
             tt_sp_in: 0.0,   // Current temp setpoint
             tt_trim_l_sp: 1.0,
             tt_trim_f_sp: 1.0,
             vlv_ch_in: ValveState::Pump,
             vlv_bl_in: ValveState::Pump,
+            pwr_in: false,
         };
 
         // ----- PID Controller -----
@@ -574,6 +575,8 @@ mod app {
             // Get elapsed time since power on
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
             let elapsed = now - *c.local.start_time;
+
+            if m.pwr != m.pwr_in {m.pwr = m.pwr_in};        // Update the power switch state to reflect the input.
 
             let sp: SetPoint;
             let setpoint_temp;

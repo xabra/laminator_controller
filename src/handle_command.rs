@@ -71,18 +71,14 @@ pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RE
         "set_system_pwr" => {
             match command.value {
                 "on" => {
-                    if !m.pwr  {
-                        m.pwr = true;
+                        m.pwr_in = true;
                         // TODO Initialize everything here for full restart....
                         info!("Setting power: {:?}", m.pwr);
-                    }
                 },
                 "off" => {
-                    if m.pwr {
-                        m.pwr = false;
+                        m.pwr_in = false;
                         // TODO clear everything neede here for safe 'shutdown'
                         info!("Setting power: {:?}", m.pwr);    
-                    }
                 },
                 _ => {},
             }

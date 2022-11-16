@@ -26,9 +26,10 @@ pub struct Measurement {
     pub t_rcp: u32,     // Owned by recipe mgr. Recipe elapsed time.
     pub seg: usize,     // Owned by recipe mgr.
     pub isrun: bool,    // Owned by recipe mgr
-    pub pwr: bool,      // Input from UI, Output to UI
+    pub pwr: bool,      // State
 
     // Pure user INPUTS from UI -- TODO not needed in this struct- not need to send to UI
+    pub pwr_in: bool,          // Input from UI
     pub tt_sp_in: f32,         // Input from UI
     pub tt_trim_l_sp: f32,     // Input from UI
     pub tt_trim_f_sp: f32,     // Input from UI
