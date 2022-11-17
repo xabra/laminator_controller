@@ -2,7 +2,9 @@
 // This object probably needs to know about a pressure sensor or pressure measurement
 // and a valve.
 
-#[derive(Debug, Copy, Clone, defmt::Format)]
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Copy, Clone, defmt::Format, Serialize, Deserialize)]
 pub enum PressureState {
     Vented,
     Intermediate,
@@ -37,5 +39,4 @@ impl ChamberController {
         if p< self.p_vacuum_threshold {return PressureState::Evacuated;}
         PressureState::Intermediate
     }
-
 }
