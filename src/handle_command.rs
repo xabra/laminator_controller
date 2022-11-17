@@ -1,28 +1,28 @@
-use crate::{data_structs::{Command, Measurement}, valve_controller::ValveState, recipe_manager::Recipe};
+use crate::{data_structs::{Command, Measurement, UiInputs}, valve_controller::ValveState, recipe_manager::Recipe};
 use crate::app::N_RECIPE_SETPOINTS;
 use defmt_rtt as _;
 use defmt::*;
 
 
-pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RECIPE_SETPOINTS>) {
+pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r: &mut Recipe<N_RECIPE_SETPOINTS>) {
     match command.cmd {
         // --- TEMP SETPOINT
         "set_temp" => {
             let v = command.value.parse::<f32>().unwrap();
-            m.tt_sp_in = v;
+            u.tt_sp_in = v;
             info!("Setting temp to: {:?}", v);    
         }
         // --- HEATER TRIM SETPOINTS
         "set_heater_trim_lr" => {
             // This input works even if a recipe is running
             let v = command.value.parse::<f32>().unwrap();
-            m.tt_trim_l_sp = v;
+            u.tt_trim_l_sp = v;
             info!("Setting heater lr trim to: {:?}", v);
         }
         "set_heater_trim_fb" => {
             // This input works even if a recipe is running
             let v = command.value.parse::<f32>().unwrap();
-            m.tt_trim_f_sp = v;
+            u.tt_trim_f_sp = v;
             info!("Setting heater fb trim to: {:?}", v);
         }
 
@@ -30,8 +30,8 @@ pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RE
         "set_valve_state_chbr" => {
             info!("Setting chamber valve: {:?}", command.value);
             match command.value {
-                "Pump" => {m.vlv_ch_in = ValveState::Pump},
-                "Vent" => {m.vlv_ch_in = ValveState::Vent},
+                "Pump" => {u.vlv_ch_in = ValveState::Pump},
+                "Vent" => {u.vlv_ch_in = ValveState::Vent},
                 _ => {},
             }
         }
@@ -39,8 +39,8 @@ pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RE
             if !r.is_running() {     // Only works if NOT running a recipe
                 info!("Setting bladder valve: {:?}", command.value);
                 match command.value {
-                    "Pump" => {m.vlv_bl_in = ValveState::Pump},
-                    "Vent" => {m.vlv_bl_in = ValveState::Vent},
+                    "Pump" => {u.vlv_bl_in = ValveState::Pump},
+                    "Vent" => {u.vlv_bl_in = ValveState::Vent},
                     _ => {},
                 }    
             }
@@ -71,12 +71,12 @@ pub fn handle_command(command: Command, m: &mut Measurement, r: &mut Recipe<N_RE
         "set_system_pwr" => {
             match command.value {
                 "on" => {
-                        m.pwr_in = true;
+                        u.pwr_in = true;
                         // TODO Initialize everything here for full restart....
                         info!("Setting power: {:?}", m.pwr);
                 },
                 "off" => {
-                        m.pwr_in = false;
+                        u.pwr_in = false;
                         // TODO clear everything neede here for safe 'shutdown'
                         info!("Setting power: {:?}", m.pwr);    
                 },
