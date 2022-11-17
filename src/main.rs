@@ -27,7 +27,7 @@ mod app {
 
     use core::fmt::Error;
 
-    //use data_structs::Measurement;
+
     use embedded_hal::digital::v2::OutputPin;
     use fugit::{MicrosDurationU32, MicrosDurationU64 ,RateExtU32};
     use defmt::*;
@@ -53,9 +53,9 @@ mod app {
     use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
     use crate::pressure_sensor_controller::PressureSensorController;
     use crate::signal_processing::{MovingAverageFilter, PIDController};
-    use crate::data_structs::{Measurement, Command};
+    use crate::data_structs::{Measurement, UiInputs, Command};
     use crate::recipe_manager::{SetPoint, VacuumSetpoint::{Vented, Evacuated}, Recipe};
-    //use crate::machine_mode::MachineMode;
+    use crate::chamber_controller::{ChamberController, PressureState};
 
 
     // PWM cycle period.
@@ -75,7 +75,7 @@ mod app {
     pub const N_RECIPE_SETPOINTS: usize = 4;
 
     const UART_RX_BUF_MAX: usize = 80;
-    const UART_TX_BUF_MAX: usize = 600;
+    const UART_TX_BUF_MAX: usize = 500;
     const UART_BAUDRATE: u32 = 57600;   // 28800, 57600, 115200 
 
     const P_ATM_THRESHOLD: f32 = -200.0;            // Pa.  Above this pressure is considered atmosphere
@@ -111,6 +111,7 @@ mod app {
 
         // Measurement data
         measurement: Measurement,
+        ui_inputs: UiInputs,
         recipe: Recipe::<N_RECIPE_SETPOINTS>,
 
     }
@@ -139,6 +140,8 @@ mod app {
         // Valves
         chamber_valve: ValveController<Gpio12>,
         bladder_valve: ValveController<Gpio11>,
+        chamber_controller: ChamberController,
+        bladder_controller: ChamberController,
         pid_controller: PIDController,
         rtc: RealTimeClock,
         start_time: u32,
@@ -298,6 +301,10 @@ mod app {
         let mut pressure_sensor_controller = PressureSensorController::new(ad_start_pin, ad_busy_pin, i2c);
         pressure_sensor_controller.init();
 
+        // ----- CHAMBER CONTROLLER -----
+        let chamber_controller = ChamberController::new(P_ATM_THRESHOLD, P_VACUUM_THRESHOLD);
+        let bladder_controller = ChamberController::new(P_ATM_THRESHOLD, P_VACUUM_THRESHOLD);
+
         // ----- SIGNAL PROCESSING ------
         let temp_ctr_filter = MovingAverageFilter::<f32, 50>::new();
         let temp_lr_filter = MovingAverageFilter::<f32, 50>::new();
@@ -318,6 +325,8 @@ mod app {
             tt_err_f: TCError::NoTCError,
             p_ch: 0.0,
             p_bl: 0.0,
+            ps_ch: PressureState::Vented,
+            ps_bl: PressureState::Evacuated,
             df_c: 0.0,
             df_l: 0.0,
             df_f: 0.0,
@@ -328,7 +337,9 @@ mod app {
             seg: 0,
             t_rcp: 0,
             isrun: false,       // Recipe is running.
+        };
 
+        let mut ui_inputs = UiInputs{
             // Setpoints/Inputs
             tt_sp_in: 0.0,   // Current temp setpoint
             tt_trim_l_sp: 1.0,
@@ -368,6 +379,7 @@ mod app {
             debug_pin,
             pwm_ctr, pwm_lr, pwm_fb,
             measurement,
+            ui_inputs,
             recipe,
             }, 
         Local {
@@ -384,10 +396,11 @@ mod app {
             // Valves
             chamber_valve,
             bladder_valve,
+            chamber_controller,
+            bladder_controller,
             pid_controller,
             rtc,
             start_time,
-            //recipe,
             uart_rx_msg_len,
             uart_rx_buffer,
             uart_writer,
@@ -554,14 +567,17 @@ mod app {
     #[task(
         priority = 1, 
         shared = [
-            measurement, 
+            measurement,
+            ui_inputs, 
             pwm_ctr, pwm_lr, pwm_fb,
             recipe,
             ],
         local = [
             toggle: bool = true, 
             chamber_valve, 
-            bladder_valve, 
+            bladder_valve,
+            chamber_controller,
+            bladder_controller, 
             pid_controller,
             rtc,
             start_time,
@@ -570,13 +586,13 @@ mod app {
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
 
-        (c.shared.measurement, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb, c.shared.recipe).lock(|m: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _, r: _| {
+        (c.shared.measurement, c.shared.ui_inputs, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb, c.shared.recipe).lock(|m: _, ui: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _, r: _| {
             
             // Get elapsed time since power on
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
             let elapsed = now - *c.local.start_time;
 
-            if m.pwr != m.pwr_in {m.pwr = m.pwr_in};        // Update the power switch state to reflect the input.
+            if m.pwr != ui.pwr_in {m.pwr = ui.pwr_in};        // Update the power switch state to reflect the input.
 
             let sp: SetPoint;
             let setpoint_temp;
@@ -597,23 +613,19 @@ mod app {
                     Vented => {c.local.bladder_valve.set_valve_state(ValveState::Vent);}
                 }
             } else{     // Not running, manual mode....
-                setpoint_temp = m.tt_sp_in;     // Get setpoint temp from user input.
-                c.local.bladder_valve.set_valve_state(m.vlv_bl_in);
-                c.local.chamber_valve.set_valve_state(m.vlv_ch_in);
+                setpoint_temp = ui.tt_sp_in;     // Get setpoint temp from user input.
+                c.local.bladder_valve.set_valve_state(ui.vlv_bl_in);
+                c.local.chamber_valve.set_valve_state(ui.vlv_ch_in);
             }
 
             // Get overall duty_factor from PID controller
             let pwm_out: f32 =  c.local.pid_controller.update(m.tt_avg, setpoint_temp);        
-
-            // Determine chamber pressure states (informational only)
-            //let ps_chbr: PressureState = c.local.chamber_valve.get_pressure_state(m.p_chamber);
-            //let ps_bladder: PressureState = c.local.chamber_valve.get_pressure_state(m.p_chamber);
         
 
             // Set the duty_factors for the 3 sets of heaters
             let df_ctr = pwm_out;
-            let df_lr = pwm_out*m.tt_trim_l_sp;
-            let df_fb = pwm_out*m.tt_trim_f_sp;
+            let df_lr = pwm_out*ui.tt_trim_l_sp;
+            let df_fb = pwm_out*ui.tt_trim_f_sp;
             pwm_ctr.set_duty_factor(df_ctr);
             pwm_lr.set_duty_factor(df_lr);
             pwm_fb.set_duty_factor(df_fb); 
@@ -626,9 +638,11 @@ mod app {
             m.vlv_ch = c.local.chamber_valve.get_valve_state();
             m.vlv_bl = c.local.bladder_valve.get_valve_state();
             m.t_ela = elapsed; // Recipe elapsed time.
-            m.df_c = df_ctr;
-            m.df_l = df_lr;
-            m.df_f = df_fb;
+            m.df_c = pwm_ctr.get_duty_factor();
+            m.df_l = pwm_lr.get_duty_factor();
+            m.df_f = pwm_fb.get_duty_factor();
+            m.ps_ch = c.local.chamber_controller.get_pressure_state(m.p_ch);
+            m.ps_bl = c.local.bladder_controller.get_pressure_state(m.p_bl);
 
             // ------------------ UART SEND ---------------
             let mut json_buf = [0_u8; UART_TX_BUF_MAX];     // Create oversized buffer to hold JSON string
@@ -650,7 +664,7 @@ mod app {
      #[task(
         priority = 2, 
         binds = UART0_IRQ,  
-        shared = [measurement, recipe],
+        shared = [measurement, ui_inputs, recipe],
         local = [uart_rx_buffer, uart_rx_msg_len, uart_reader],
     )]
     fn uart_receive_task (c: uart_receive_task::Context) { 
@@ -658,6 +672,7 @@ mod app {
 
         let mut cm = c.shared.measurement;
         let mut rec = c.shared.recipe;
+        let mut ui = c.shared.ui_inputs;
 
         while let Ok(byte) = uart_reader.read() {                 // Read bytes until none avail in FIFO
             if byte != 0x0a {   // If byte is not a newline, 
@@ -672,7 +687,9 @@ mod app {
                     //info!("Parsed command object: {:?}, {:?}", command, byte_count);
                     cm.lock(|m| {       // Dont understand why I couldnt lock multiple variables with a tuple...??
                         rec.lock(|r| {
-                            crate::handle_command::handle_command(command, m, r);
+                            ui.lock(|u| {
+                                crate::handle_command::handle_command(command, m, u, r);
+                            })
                         });
                     })
                     

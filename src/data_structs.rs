@@ -1,4 +1,4 @@
-use crate::{thermocouple_controller::TCError, valve_controller::ValveState};
+use crate::{thermocouple_controller::TCError, valve_controller::ValveState, chamber_controller::PressureState};
 use serde::{Serialize, Deserialize};
 // use serde_json_core;
 use defmt_rtt as _;
@@ -17,6 +17,8 @@ pub struct Measurement {
     pub tt_err_f: TCError,  
     pub p_ch: f32,
     pub p_bl: f32,
+    pub ps_ch: PressureState,
+    pub ps_bl: PressureState,
     pub df_c: f32,
     pub df_l: f32,
     pub df_f: f32,
@@ -28,6 +30,10 @@ pub struct Measurement {
     pub isrun: bool,    // Owned by recipe mgr
     pub pwr: bool,      // State
 
+
+}
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct UiInputs {
     // Pure user INPUTS from UI -- TODO not needed in this struct- not need to send to UI
     pub pwr_in: bool,          // Input from UI
     pub tt_sp_in: f32,         // Input from UI
@@ -36,7 +42,6 @@ pub struct Measurement {
     pub vlv_ch_in: ValveState, // Input from UI
     pub vlv_bl_in: ValveState, // Input from UI
 }
-
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, defmt::Format)]
 pub struct Command<'a> {
