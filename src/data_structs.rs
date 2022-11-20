@@ -29,6 +29,8 @@ pub struct Measurement {
     pub seg: usize,     // Owned by recipe mgr.
     pub isrun: bool,    // Owned by recipe mgr
     pub pwr: bool,      // State
+    pub trim_l: f32,
+    pub trim_f: f32,
 
 
 }
