@@ -337,6 +337,8 @@ mod app {
             seg: 0,
             t_rcp: 0,
             isrun: false,       // Recipe is running.
+            trim_l: 1.0,
+            trim_f: 1.0,
         };
 
         let mut ui_inputs = UiInputs{
@@ -595,6 +597,7 @@ mod app {
             if m.pwr != ui.pwr_in {m.pwr = ui.pwr_in};        // Update the power switch state to reflect the input.
 
             let sp: SetPoint;
+
             let setpoint_temp;
 
             if r.is_running() {     // If recipe is running...
@@ -624,8 +627,8 @@ mod app {
 
             // Set the duty_factors for the 3 sets of heaters
             let df_ctr = pwm_out;
-            let df_lr = pwm_out*ui.tt_trim_l_sp;
-            let df_fb = pwm_out*ui.tt_trim_f_sp;
+            let df_lr = pwm_out*m.trim_l;
+            let df_fb = pwm_out*m.trim_f;
             pwm_ctr.set_duty_factor(df_ctr);
             pwm_lr.set_duty_factor(df_lr);
             pwm_fb.set_duty_factor(df_fb); 
