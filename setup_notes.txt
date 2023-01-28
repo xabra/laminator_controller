@@ -1,0 +1,25 @@
+Setup Notes
+(sudo may be required)
+
+To find the IP address of the RPI, you must be logged into the RPI
+    > ifconfig
+
+To connect to the RPI remotely from a terminal
+    > ssh pi@<ip address>
+    > enter PRI password at prompt
+
+To see the processes running on the pi (-A = all).  mosquitto should be listed
+    > ps -A
+
+
+To start/stop/restart/check status of the mosquitto service
+    > systemctl stop mosquitto.service
+    > systemctl start mosquitto.service
+    > systemctl restart mosquitto.service
+    > systemctl status application.service
+
+To subscribe to a topic (-t)
+    > mosquitto_sub -t dev/test
+
+To publish a message on topic t.
+    > mosquitto_pub -t dev/test -m "Hello World"
