@@ -11,7 +11,7 @@ pub mod data_structs;
 pub mod time_util;
 pub mod recipe_manager;
 pub mod handle_command;
-//pub mod machine_mode;
+pub mod machine_mode;
 
 use panic_halt as _;
 use defmt_rtt as _;
@@ -594,7 +594,7 @@ mod app {
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
             let elapsed = now - *c.local.start_time;
 
-            if m.pwr != ui.pwr_in {m.pwr = ui.pwr_in};        // Update the power switch state to reflect the input.
+            if m.pwr != ui.pwr_in {m.pwr = ui.pwr_in};        // Update the power state to reflect the input.
 
             let sp: SetPoint;
 
@@ -653,7 +653,7 @@ mod app {
             json_buf[buf_len] = 0x0a;   // Append newline 'char'
             c.local.uart_writer.write_full_blocking(&json_buf[..=buf_len]);        // Write buffer/string to UART
 
-            info!("Sent bytes = {:?}, incl newline", buf_len+1);
+            info!("Sent {:?} bytes", buf_len+1);
         });
 
         // --- Reschedule this task

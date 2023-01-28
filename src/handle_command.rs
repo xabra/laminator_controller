@@ -26,7 +26,7 @@ pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r
             info!("Setting heater fb trim to: {:?}", v);
         }
 
-        // --- VALVE STATE INPUTS
+        // --- VALVE STATE
         "set_valve_state_chbr" => {
             info!("Setting chamber valve: {:?}", command.value);
             match command.value {
@@ -65,7 +65,6 @@ pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r
                 },
                 _ => {},
             }
-            
         }
 
         // --- POWER ON/OFF
