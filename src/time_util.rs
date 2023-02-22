@@ -1,5 +1,5 @@
-use fugit::{MicrosDurationU32, MicrosDurationU64 ,RateExtU32, Instant};
-use  rp_pico::hal::rtc::{RealTimeClock, DateTime, DayOfWeek};
+use fugit::{Instant};
+use  rp_pico::hal::rtc::{DateTime};
 use defmt_rtt as _;
 
 pub fn date_time_to_seconds(dt: DateTime) -> u32{

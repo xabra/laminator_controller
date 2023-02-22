@@ -5,8 +5,6 @@ use rp_pico::hal::gpio;
 use rp_pico::hal::gpio::{PinId, Output, PushPull};
 use rp_pico::hal::spi::{Spi, Enabled};
 
-
-
 // Logging stuff..
 use defmt::*;
 use defmt_rtt as _;
@@ -47,9 +45,10 @@ pub enum TCError {
     TempSensorOpenCircuit,
     NoTCError,
 }
-// Struct containing a channel, a temp and the error state for that channel
-// The T/C cold-junction refererence temp is not used right now.
-// It should be called TemperatureRecord or something...
+/*
+Struct containing a channel, a temp and the error state for that channel
+The T/C cold-junction refererence temp is not used right now.
+It should be called TemperatureRecord or something...
 #[derive(Debug, Copy, Clone, Format)]
 pub struct Temperatures {
     pub channel: TCChannel,
@@ -57,6 +56,7 @@ pub struct Temperatures {
     //pub ref_temp: f32,
     pub error: Option<TCError>,
 }
+*/
 
 // Encapsulates the board level controller which owns three TC controller ICs
 // and an SPI bus to control them all
@@ -176,7 +176,7 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
     }
     // Test one bit in high word to determine if any TC error ocurred
     // Useful in cases where only one (high) word is read for speed
-    fn _is_tc_error(&self, high_word: u16) -> bool { 
+    fn is_tc_error(&self, high_word: u16) -> bool { 
         return high_word & TC_ERROR_MASK == 1;
     }
     

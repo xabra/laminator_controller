@@ -34,7 +34,7 @@ pub struct PressureSensorController<I1, I2, P> where
     P: Read+Write,
     {
     ad_start_pin: gpio::Pin<I1, Output<PushPull>>,
-    ad_busy_pin: gpio::Pin<I2, Input<Floating>>,   // Not used for now
+    _ad_busy_pin: gpio::Pin<I2, Input<Floating>>,   // Not used for now
     i2c: P,  
     pressures: [f32;4],  // A place to cache the results
 }
@@ -46,13 +46,13 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
     {
     pub fn new(
         ad_start_pin: gpio::Pin<I1, Output<PushPull>>,
-        ad_busy_pin: gpio::Pin<I2, Input<Floating>>,
+        _ad_busy_pin: gpio::Pin<I2, Input<Floating>>,
         i2c: P,
     ) -> PressureSensorController<I1, I2, P> {  
 
         PressureSensorController {
             ad_start_pin,
-            ad_busy_pin,
+            _ad_busy_pin,
             i2c,
             pressures: [0.0_f32; 4],
         }

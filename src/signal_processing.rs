@@ -1,6 +1,4 @@
-use core::fmt::Debug;
 use num_traits::float::Float;
-use defmt::*;
 
 pub enum SignalProcError {
     ZeroLengthArray,

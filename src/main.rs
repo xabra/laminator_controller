@@ -25,9 +25,6 @@ use defmt_rtt as _;
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true, dispatchers = [ADC_IRQ_FIFO, UART1_IRQ, DMA_IRQ_1])]    
 mod app {
 
-    use core::fmt::Error;
-
-
     use embedded_hal::digital::v2::OutputPin;
     use fugit::{MicrosDurationU32, MicrosDurationU64 ,RateExtU32};
     use defmt::*;
@@ -313,7 +310,7 @@ mod app {
         let p_chamber_filter = MovingAverageFilter::<f32, 50>::new();
         let p_bladder_filter = MovingAverageFilter::<f32, 50>::new();
 
-        let mut measurement = Measurement {
+        let measurement = Measurement {
             tt_c: 0.0,
             tt_l: 0.0,
             tt_f: 0.0,   
@@ -341,7 +338,7 @@ mod app {
             trim_f: 1.0,
         };
 
-        let mut ui_inputs = UiInputs{
+        let ui_inputs = UiInputs{
             // Setpoints/Inputs
             tt_sp_in: 0.0,   // Current temp setpoint
             tt_trim_l_sp: 1.0,
@@ -485,7 +482,7 @@ mod app {
         let mut temp_ctr:f32 = 0.0;
         let mut temp_lr:f32 = 0.0;
         let mut temp_fb:f32 = 0.0;
-        let mut temp_avg: f32 = 0.0;
+        let temp_avg: f32;
         let mut temp_err_ctr: TCError = TCError::NoTCError;
         let mut temp_err_lr: TCError = TCError::NoTCError;
         let mut temp_err_fb: TCError = TCError::NoTCError;
@@ -524,8 +521,8 @@ mod app {
 
         
         // Acquire pressure measurements
-        let mut p_chamber:f32 = 0.0;
-        let mut p_bladder:f32 = 0.0;
+        let p_chamber:f32;
+        let p_bladder:f32;
         let psc = c.local.pressure_sensor_controller;
         psc.acquire_all();
         p_chamber = psc.get_pressure(0);
@@ -558,7 +555,7 @@ mod app {
 
 
         // Schedule next iteration
-        let mut alarm = c.local.alarm2;
+        let alarm = c.local.alarm2;
         alarm.clear_interrupt();
         let _ = alarm.schedule(SAMPLE_TICK_US);
 
