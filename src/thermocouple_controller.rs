@@ -32,18 +32,24 @@ pub enum ChipSelectState {
 
 // Give the T/Cs names
 #[derive(Debug, Copy, Clone, Format)]
+// Gives names to each board level T/C channel
+// This seems very ad hoc...not general
 pub enum TCChannel {
     Center,
     LeftRight,
     FrontBack,
 }
 #[derive(Debug, Copy, Clone, Format, PartialEq, Serialize, Deserialize)]
+// Thermocouple errors reported by each TC controller chip
 pub enum TCError {
     TempSensorShortToVCC,
     TempSensorShortToGND,
     TempSensorOpenCircuit,
     NoTCError,
 }
+// Struct containing a channel, a temp and the error state for that channel
+// The T/C cold-junction refererence temp is not used right now.
+// It should be called TemperatureRecord or something...
 #[derive(Debug, Copy, Clone, Format)]
 pub struct Temperatures {
     pub channel: TCChannel,
@@ -51,7 +57,10 @@ pub struct Temperatures {
     //pub ref_temp: f32,
     pub error: Option<TCError>,
 }
-// Lousy code- should use anypin...
+
+// Encapsulates the board level controller which owns three TC controller ICs
+// and an SPI bus to control them all
+// Lousy code...?
 pub struct ThermocoupleController<I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> {
     cs_ctr: gpio::Pin<I1, Output<PushPull>>,
     cs_lr: gpio::Pin<I2, Output<PushPull>>,
@@ -60,6 +69,7 @@ pub struct ThermocoupleController<I1: PinId, I2: PinId, I3: PinId, D: SpiDevice>
 }
 
 impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, I2, I3, D> {
+    // Create a new T/C controller
     pub fn new(
         cs_ctr: gpio::Pin<I1, Output<PushPull>>, 
         cs_lr: gpio::Pin<I2, Output<PushPull>>,
@@ -80,6 +90,8 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
         self.deselect_all ();
     }
 
+    // This is the main public interface to this module
+    // Acquires one temp measurement from the selected channel
     pub fn acquire(&mut self, channel: TCChannel) -> Result<f32,TCError> {
         // Read raw data
         let (w0,w1) = self.read_raw(channel);
@@ -104,7 +116,7 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
 
     // Low-level function to set the chip select line of one tc to specified state
     // Does NOT enforce exclusivity.
-    // Lousy code --> use anypin or something...
+    // Lousy code --> 
     fn set_chip_select(&mut self, channel: TCChannel, state:ChipSelectState){
         match channel {
             Center => {

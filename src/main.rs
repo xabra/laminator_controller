@@ -478,7 +478,7 @@ mod app {
     )]
     fn sample_period_task (mut c: sample_period_task::Context) { 
 
-        // Debug pin for checking timing...
+        // Debug pin for checking timing...delete at some point...
         c.shared.debug_pin.lock(|l| l.set_high().unwrap());
 
         // Acquire temperature measurements
@@ -494,6 +494,7 @@ mod app {
         let mut good_tc_count:u32 = 0;      // Number of good T/Cs for the average
         let mut temp_sum: f32 = 0.0;        // for the average temp
 
+        // Following code is repeating itself for each channel...not good...iterator?
         match tcc.acquire(TCChannel::Center) {
             Err(e) => {temp_err_ctr = e;},
             Ok(t) => { 
