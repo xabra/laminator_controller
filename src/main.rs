@@ -503,7 +503,8 @@ mod app {
 
         match tcc.acquire(TCChannel::LeftRight) {
             Err(e) => {temp_err_lr = e;},
-            Ok(t) => { temp_lr = t;
+            Ok(t) => { 
+                temp_lr = t;
                 temp_sum += t;
                 good_tc_count += 1;
             },
