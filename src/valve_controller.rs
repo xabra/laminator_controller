@@ -32,10 +32,10 @@ impl <I: PinId> ValveController<I> {
             self.current_valve_state = new_valve_state;           // Update internal state variable
             match new_valve_state {                               // drive the pin appropriately 
                 ValveState::Vent => {
-                    self.valve_pin.set_high().unwrap();
+                    self.valve_pin.set_low().unwrap();
                 },
                 ValveState::Pump => {
-                    self.valve_pin.set_low().unwrap();
+                    self.valve_pin.set_high().unwrap();
                 },
             } 
         }
