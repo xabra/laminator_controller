@@ -33,7 +33,7 @@ mod app {
         hal::{self, clocks::init_clocks_and_plls, timer::{monotonic::Monotonic, Alarm, Alarm0}, watchdog::Watchdog, Sio},
         XOSC_CRYSTAL_FREQ,
     };
-    use rp_pico::hal::gpio::pin::bank0::{Gpio0, Gpio1, Gpio4, Gpio5, Gpio6, Gpio7, Gpio8, Gpio11, Gpio12, Gpio13, Gpio14, Gpio15, Gpio17, Gpio19, Gpio20};
+    use rp_pico::hal::gpio::pin::bank0::{Gpio0, Gpio1, Gpio4, Gpio5, Gpio6, Gpio7, Gpio8, Gpio11, Gpio12, Gpio13, Gpio14, Gpio15};
     use rp_pico::hal::spi;
     use rp_pico::hal::pac::SPI0;
     use rp_pico::hal::pac::I2C0;
@@ -47,7 +47,7 @@ mod app {
 
     use crate::{pwm_controller::PWM, thermocouple_controller::TCError};
     use crate::valve_controller::{ValveController, ValveState};
-    use crate::thermocouple_controller::{ThermocoupleController, TCChannel};
+    use crate::thermocouple_controller::ThermocoupleController;
     use crate::pressure_sensor_controller::PressureSensorController;
     use crate::signal_processing::{MovingAverageFilter, PIDController};
     use crate::data_structs::{Measurement, UiInputs, Command};
@@ -68,7 +68,7 @@ mod app {
 
     // Length of the low pass averaging filter
     const FILTER_LENGTH: usize = 50;
-
+    const N_TC_CHANNELS: usize = 3;
     pub const N_RECIPE_SETPOINTS: usize = 4;
 
     const UART_RX_BUF_MAX: usize = 80;
@@ -123,7 +123,7 @@ mod app {
         alarm2: hal::timer::Alarm2,     // For sample tick
         
         // Thermocouple
-        tc_controller: ThermocoupleController<Gpio17, Gpio19, Gpio20, SPI0>,
+        tc_controller: ThermocoupleController<SPI0, N_TC_CHANNELS>,
 
         // Pressure Sensor Controller
         pressure_sensor_controller: PressureSensorController<Gpio6, Gpio7, I2C<I2C0, (Pin<Gpio4, FunctionI2C>, Pin<Gpio5, FunctionI2C>)>>,
@@ -260,9 +260,9 @@ mod app {
 
         // ------------- THERMOCOUPLE CONTROLLER ---------
         // Chip select pins
-        let cs_ctr = pins.gpio17.into_push_pull_output();
-        let cs_lr = pins.gpio19.into_push_pull_output();
-        let cs_fb = pins.gpio20.into_push_pull_output();
+        // let cs_ctr = pins.gpio17.into_push_pull_output();
+        // let cs_lr = pins.gpio19.into_push_pull_output();
+        // let cs_fb = pins.gpio20.into_push_pull_output();
 
         // Set up SPI CLK and DataIn Lines.  These are implicitly used by the spi driver if they are in the correct mode
         let _spi_sclk = pins.gpio18.into_mode::<rp2040_hal::gpio::FunctionSpi>();
@@ -272,7 +272,10 @@ mod app {
         // Set up spi
         let spi = spi::Spi::<_, _, 16>::new(c.device.SPI0).init(&mut resets, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
 
-        let mut tc_controller = ThermocoupleController::new(cs_ctr, cs_lr, cs_fb, spi);
+        let mut tc_controller = ThermocoupleController::<_, N_TC_CHANNELS>::new(spi);
+        tc_controller.add_channel(pins.gpio17.into_push_pull_output().into(), true);    // Center
+        tc_controller.add_channel(pins.gpio20.into_push_pull_output().into(), false);          // Front-Back
+        tc_controller.add_channel(pins.gpio19.into_push_pull_output().into(), false);          // Left-Right
         tc_controller.init();
 
         // --------------- PRESSURE SENSOR CONTROLLER -----------
@@ -492,7 +495,7 @@ mod app {
         let mut temp_sum: f32 = 0.0;        // for the average temp
 
         // Following code is repeating itself for each channel...not good...iterator?
-        match tcc.acquire(TCChannel::Center) {
+        match tcc.acquire(0) {
             Err(e) => {temp_err_ctr = e;},
             Ok(t) => { 
                 temp_ctr = t;
@@ -501,7 +504,7 @@ mod app {
             },
         }
 
-        match tcc.acquire(TCChannel::LeftRight) {
+        match tcc.acquire(2) {
             Err(e) => {temp_err_lr = e;},
             Ok(t) => { 
                 temp_lr = t;
@@ -510,7 +513,7 @@ mod app {
             },
         }
 
-        match tcc.acquire(TCChannel::FrontBack) {
+        match tcc.acquire(1) {
             Err(e) => {temp_err_fb = e;},
             Ok(t) => {
                 temp_fb = t;

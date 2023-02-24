@@ -301,6 +301,7 @@ dependencies = [
  "defmt-rtt",
  "embedded-hal",
  "fugit",
+ "heapless",
  "libm",
  "num-traits",
  "panic-halt",

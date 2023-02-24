@@ -1,8 +1,7 @@
 use cortex_m::prelude::_embedded_hal_blocking_spi_Transfer;
 use embedded_hal::digital::v2::OutputPin;
+use rp2040_hal::gpio::{DynPin};
 use rp2040_hal::spi::SpiDevice;
-use rp_pico::hal::gpio;
-use rp_pico::hal::gpio::{PinId, Output, PushPull};
 use rp_pico::hal::spi::{Spi, Enabled};
 
 // Logging stuff..
@@ -10,8 +9,8 @@ use defmt::*;
 use defmt_rtt as _;
 
 use ChipSelectState::{Selected, Deselected};
-use TCChannel::{Center, LeftRight, FrontBack};
 use serde::{Serialize, Deserialize};
+use heapless::Vec;
 
 // Constants
 const HIGH_WORD_DATA_MASK:u16 = 0b1111_1111_1111_1100;
@@ -28,15 +27,6 @@ pub enum ChipSelectState {
     Deselected,
 }
 
-// Give the T/Cs names
-#[derive(Debug, Copy, Clone, Format)]
-// Gives names to each board level T/C channel
-// This seems very ad hoc...not general
-pub enum TCChannel {
-    Center,
-    LeftRight,
-    FrontBack,
-}
 #[derive(Debug, Copy, Clone, Format, PartialEq, Serialize, Deserialize)]
 // Thermocouple errors reported by each TC controller chip
 pub enum TCError {
@@ -45,42 +35,27 @@ pub enum TCError {
     TempSensorOpenCircuit,
     NoTCError,
 }
-/*
-Struct containing a channel, a temp and the error state for that channel
-The T/C cold-junction refererence temp is not used right now.
-It should be called TemperatureRecord or something...
-#[derive(Debug, Copy, Clone, Format)]
-pub struct Temperatures {
-    pub channel: TCChannel,
-    pub tc_temp: f32,
-    //pub ref_temp: f32,
-    pub error: Option<TCError>,
-}
-*/
 
-// Encapsulates the board level controller which owns three TC controller ICs
-// and an SPI bus to control them all
-// Lousy code...?
-pub struct ThermocoupleController<I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> {
-    cs_ctr: gpio::Pin<I1, Output<PushPull>>,
-    cs_lr: gpio::Pin<I2, Output<PushPull>>,
-    cs_fb: gpio::Pin<I3, Output<PushPull>>,
+// A Thermocouple channel encapsulates a chip select pin 
+// and a boolean that describes whether the T/C is grounded or not
+pub struct TCChannelDescriptor {
+    cs_pin: DynPin,
+    grounded: bool,
+}
+
+// A board level thermocouple controller which owns multiple T/C channels
+// in an array, and an SPI bus to control them all
+pub struct ThermocoupleController<D: SpiDevice, const N: usize> {
+    channels: Vec<TCChannelDescriptor, N>,
     spi: Spi<Enabled, D, 16>,
 }
 
-impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, I2, I3, D> {
+impl <D: SpiDevice, const N: usize> ThermocoupleController<D, N> {
     // Create a new T/C controller
-    pub fn new(
-        cs_ctr: gpio::Pin<I1, Output<PushPull>>, 
-        cs_lr: gpio::Pin<I2, Output<PushPull>>,
-        cs_fb: gpio::Pin<I3, Output<PushPull>>,
-        spi: Spi<Enabled, D, 16>) 
-        -> ThermocoupleController<I1, I2, I3, D> {
-
-        ThermocoupleController{
-            cs_ctr,
-            cs_lr,
-            cs_fb,
+    pub fn new(spi: Spi<Enabled, D, 16>) -> ThermocoupleController<D, N> {
+        let channels = Vec::new();
+        ThermocoupleController {
+            channels,
             spi,
         }
     }
@@ -90,18 +65,31 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
         self.deselect_all ();
     }
 
-    // This is the main public interface to this module
+    pub fn add_channel(&mut self, cs_pin: DynPin, grounded: bool) {
+        let channel: TCChannelDescriptor = TCChannelDescriptor { cs_pin, grounded };
+        let result = self.channels.push(channel);
+        match result {
+            Err(_) => {info!("Failed to add channel")},
+            Ok(_) => {()},
+        }
+    }
+
     // Acquires one temp measurement from the selected channel
-    pub fn acquire(&mut self, channel: TCChannel) -> Result<f32,TCError> {
+    pub fn acquire(&mut self, channel: usize) -> Result<f32,TCError> {
         // Read raw data
         let (w0,w1) = self.read_raw(channel);
 
-        // Check for an error
+        // Check for an error.  GND errors on grounded TCs are ignored.  Data is still valid
         match self.get_tc_error(w1) {
-            Some(error) => {
-                return Err(error);
+            Some(error) => {    // If there is an error reported by the IC...
+                if self.channels[channel].grounded == true && error == TCError::TempSensorShortToGND {
+                    // If the error is a grounding error and the TC is grounded (intentionally)
+                    return Ok(self.tc_temperature_degc(w0));    // Return Ok(temp)
+                } else {    // We have a real TC error
+                    return Err(error);
+                }
             },
-            None => {
+            None => {   // If no error return Ok(temp)
                 Ok(self.tc_temperature_degc(w0))
             }
         }
@@ -109,40 +97,22 @@ impl <I1: PinId, I2: PinId, I3: PinId, D: SpiDevice> ThermocoupleController<I1, 
     
     // Deselect all chip selects
     fn deselect_all (&mut self) {
-        self.set_chip_select(Center, Deselected);
-        self.set_chip_select(LeftRight, Deselected);
-        self.set_chip_select(FrontBack, Deselected);
+        for ch in 0..self.channels.len() {
+            self.set_chip_select(ch, Deselected);
+        }
     }
 
     // Low-level function to set the chip select line of one tc to specified state
-    // Does NOT enforce exclusivity.
-    // Lousy code --> 
-    fn set_chip_select(&mut self, channel: TCChannel, state:ChipSelectState){
-        match channel {
-            Center => {
-                match state {
-                    Deselected => self.cs_ctr.set_high().unwrap(),
-                    Selected => self.cs_ctr.set_low().unwrap(),
-                } 
-            },
-            LeftRight => {
-                match state {
-                    Deselected => self.cs_lr.set_high().unwrap(),
-                    Selected => self.cs_lr.set_low().unwrap(),
-                } 
-            },
-            FrontBack => {
-                match state {
-                    Deselected => self.cs_fb.set_high().unwrap(),
-                    Selected => self.cs_fb.set_low().unwrap(),
-                } 
-            },
+    // !!! Does NOT enforce exclusivity.!!!
+    fn set_chip_select(&mut self, channel: usize, state:ChipSelectState){
+        match state {
+            Deselected => self.channels[channel].cs_pin.set_high().unwrap(),
+            Selected => self.channels[channel].cs_pin.set_low().unwrap(),
         }
-
     }
 
     // Select chip select, SPI read both temp words, deselect chip select
-    fn read_raw(&mut self, channel: TCChannel) -> (u16, u16) {
+    fn read_raw(&mut self, channel: usize) -> (u16, u16) {
         let buf = &mut [0x0000u16, 0x0000u16];   // Must write any data to chip to read data.
         self.set_chip_select(channel, Selected);       // Assert chip select 
         let raw = self.spi.transfer( buf).unwrap(); // transfer 2 16 bit words out/in.
