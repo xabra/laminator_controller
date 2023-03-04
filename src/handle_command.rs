@@ -83,6 +83,24 @@ pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r
                 _ => {},
             }
         }
+        // --- SET PRESSURE THRESHOLDS
+        "set_chbr_vent_thresh" => {
+            let th = command.value.parse::<u32>().unwrap();
+            info!("Setting chbr vent thresh: {:?}", th);
+        }
+        "set_chbr_vac_thresh" => {
+            let th = command.value.parse::<u32>().unwrap();
+            info!("Setting chbr vac thresh: {:?}", th);
+        }
+        "set_bladder_vent_thresh" => {
+            let th = command.value.parse::<u32>().unwrap();
+            info!("Setting bladder vent thresh: {:?}", th);
+        }
+        "set_bladder_vac_thresh" => {
+            let th = command.value.parse::<u32>().unwrap();
+            info!("Setting bladder vac
+             thresh: {:?}", th);
+        }
 
         // --- Default case
         _ => {info!("No command found");}
