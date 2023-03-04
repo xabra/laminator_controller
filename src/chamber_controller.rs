@@ -34,6 +34,14 @@ impl ChamberController {
         }
     }
 
+    pub fn set_atm_threshold(&mut self, p:f32) {
+        self.p_atm_threshold = p;
+    }
+
+    pub fn set_vacuum_threshold(&mut self, p:f32){
+        self.p_vacuum_threshold = p;
+    }
+
     pub fn get_pressure_state(&self, p:f32) -> PressureState {
         if p> self.p_atm_threshold {return PressureState::Vented;}
         if p< self.p_vacuum_threshold {return PressureState::Evacuated;}
