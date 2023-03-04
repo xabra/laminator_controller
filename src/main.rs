@@ -273,7 +273,7 @@ mod app {
         let spi = spi::Spi::<_, _, 16>::new(c.device.SPI0).init(&mut resets, 125_000_000u32.Hz(), 1_000_000u32.Hz(), &embedded_hal::spi::MODE_0,);
 
         let mut tc_controller = ThermocoupleController::<_, N_TC_CHANNELS>::new(spi);
-        tc_controller.add_channel(pins.gpio17.into_push_pull_output().into(), true);    // Center
+        tc_controller.add_channel(pins.gpio17.into_push_pull_output().into(), false);          // Center
         tc_controller.add_channel(pins.gpio20.into_push_pull_output().into(), false);          // Front-Back
         tc_controller.add_channel(pins.gpio19.into_push_pull_output().into(), false);          // Left-Right
         tc_controller.init();
@@ -495,6 +495,7 @@ mod app {
         let mut temp_sum: f32 = 0.0;        // for the average temp
 
         // Following code is repeating itself for each channel...not good...iterator?
+        // Or pass in a Vec to be populated by TCController
         match tcc.acquire(0) {
             Err(e) => {temp_err_ctr = e;},
             Ok(t) => { 
