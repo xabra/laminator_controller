@@ -348,6 +348,10 @@ mod app {
             tt_trim_f_sp: 1.0,
             vlv_ch_in: ValveState::Pump,
             vlv_bl_in: ValveState::Pump,
+            ch_vac_th: 200.0,   // How to sync UI and controller state, especially at startup?
+            ch_vnt_th: 200.0,
+            bl_vac_th: 200.0,
+            bl_vnt_th: 200.0,
             pwr_in: false,
         };
 
@@ -670,10 +674,19 @@ mod app {
      #[task(
         priority = 2, 
         binds = UART0_IRQ,  
-        shared = [measurement, ui_inputs, recipe],
-        local = [uart_rx_buffer, uart_rx_msg_len, uart_reader],
+        shared = [
+            measurement, 
+            ui_inputs, 
+            recipe
+            ],
+        local = [
+            uart_rx_buffer, 
+            uart_rx_msg_len, 
+            uart_reader
+            ],
     )]
     fn uart_receive_task (c: uart_receive_task::Context) { 
+        // I think this should be refactored to put events in a shared queue...how?
         let uart_reader = c.local.uart_reader; 
 
         let mut cm = c.shared.measurement;
@@ -684,12 +697,12 @@ mod app {
             if byte != 0x0a {   // If byte is not a newline, 
                 c.local.uart_rx_buffer[*c.local.uart_rx_msg_len] = byte;     // Accumulate byte into buffer
                 *c.local.uart_rx_msg_len += 1;           // Increment the message length
-            } else {        // Otherwise, if we found a newline char...
+            } else {        // Otherwise, we found a newline char...
                 //let sslice = core::str::from_utf8(&c.local.buffer[0..*c.local.msg_len]).unwrap();   // Convert buffer to string slice for debug
                 
                 //info!("UI >> Controller Received Message {}", sslice);        // Print the msg contents
                 let result: Result<(Command, usize), serde_json_core::de::Error> = serde_json_core::from_slice(&c.local.uart_rx_buffer[0..*c.local.uart_rx_msg_len]);
-                if let Ok((command, _)) = result  {
+                if let Ok((command, _)) = result  { // If deserialize succeeded...
                     //info!("Parsed command object: {:?}, {:?}", command, byte_count);
                     cm.lock(|m| {       // Dont understand why I couldnt lock multiple variables with a tuple...??
                         rec.lock(|r| {
@@ -699,7 +712,7 @@ mod app {
                         });
                     })
                     
-                } else {
+                } else {        // otherwise deserialize failed...
                     info!("Deserialize failed");
                 }
                 *c.local.uart_rx_msg_len = 0;    // reset the message length counter

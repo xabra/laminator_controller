@@ -36,13 +36,17 @@ pub struct Measurement {
 }
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct UiInputs {
-    // Pure user INPUTS from UI -- TODO not needed in this struct- not need to send to UI
+    // Pure user INPUTS from UI
     pub pwr_in: bool,          // Input from UI
     pub tt_sp_in: f32,         // Input from UI
     pub tt_trim_l_sp: f32,     // Input from UI
     pub tt_trim_f_sp: f32,     // Input from UI
     pub vlv_ch_in: ValveState, // Input from UI
     pub vlv_bl_in: ValveState, // Input from UI
+    pub ch_vnt_th: f32,
+    pub ch_vac_th: f32,
+    pub bl_vnt_th: f32,
+    pub bl_vac_th: f32,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, defmt::Format)]

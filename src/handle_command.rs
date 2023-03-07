@@ -5,6 +5,7 @@ use defmt::*;
 
 
 pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r: &mut Recipe<N_RECIPE_SETPOINTS>) {
+    // horrifyingly bad code...
     match command.cmd {
         // --- TEMP SETPOINT
         "set_temp" => {
@@ -85,19 +86,23 @@ pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r
         }
         // --- SET PRESSURE THRESHOLDS
         "set_chbr_vent_thresh" => {
-            let th = command.value.parse::<u32>().unwrap();
+            let th = command.value.parse::<f32>().unwrap();
+            u.ch_vnt_th = th;
             info!("Setting chbr vent thresh: {:?}", th);
         }
         "set_chbr_vac_thresh" => {
-            let th = command.value.parse::<u32>().unwrap();
+            let th = command.value.parse::<f32>().unwrap();
+            u.ch_vac_th = th;
             info!("Setting chbr vac thresh: {:?}", th);
         }
         "set_bladder_vent_thresh" => {
-            let th = command.value.parse::<u32>().unwrap();
+            let th = command.value.parse::<f32>().unwrap();
+            u.bl_vnt_th = th;
             info!("Setting bladder vent thresh: {:?}", th);
         }
         "set_bladder_vac_thresh" => {
-            let th = command.value.parse::<u32>().unwrap();
+            let th = command.value.parse::<f32>().unwrap();
+            u.bl_vac_th = th;
             info!("Setting bladder vac
              thresh: {:?}", th);
         }
