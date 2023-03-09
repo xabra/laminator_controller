@@ -19,8 +19,8 @@ const PRESSURE_SENSE_VREF:f32 = 5.0;
 // Sensor scaling from Volts to Pa per spec sheet PSE54x
 const SCALE_VA:f32 = 1.0;   // Volts
 const SCALE_VB:f32 = 5.0;   // Volts
-const SCALE_PA:f32 = 0.0;   // Pa
-const SCALE_PB:f32 = -101_000.0;  // Pa
+const SCALE_PA:f32 = 0.0;   // Pa   - Hmm. These duplicate consts in the chamber controller...
+const SCALE_PB:f32 = -101_000.0;  // Pa  - Hmm. These duplicate consts in the chamber controller...put in a central place?
 const SCALE_SLOPE:f32 = (SCALE_PB-SCALE_PA)/(SCALE_VB-SCALE_VA);
 const SCALE_OFFSET:f32 = SCALE_PA-SCALE_VA*SCALE_SLOPE;
 
@@ -94,10 +94,10 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
             Ok(()) => (),
             Err(_) => panic!("I2C Read error"),
         };
-        let channel_index = raw_to_channel_index(buf[0]) as usize;
-        let counts = raw_to_counts (buf[0], buf[1]);
-        let volts = counts_to_volts (counts);
-        let pressure_pa = volts_to_pressure_pa(volts);
+        let channel_index = raw_to_channel_index(buf[0]) as usize;  // Convert the raw bytes to the A/D channel that was read
+        let counts = raw_to_counts (buf[0], buf[1]);         // Convert the raw bytes to A/D measurement count
+        let volts = counts_to_volts (counts);                                    // Convert the A/D counts to a voltage via linear interpolation
+        let pressure_pa = volts_to_pressure_pa(volts);                  // Convert the volts to a nominal pressure via linear interpolation mfg formula
 
         (channel_index, pressure_pa ) // Return pressure measurement tuple
     }
