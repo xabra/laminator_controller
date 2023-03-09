@@ -4,6 +4,10 @@
 
 use serde::{Serialize, Deserialize};
 
+// Same constants are in the pressure sensor controller ?!
+const P_ATM: f32 = 0.0;            // Pa.  Atmospheric pressure
+const P_VAC: f32 = -101_000.0;     // Pa.  Full vacuum pressure
+
 #[derive(Debug, Copy, Clone, defmt::Format, Serialize, Deserialize)]
 pub enum PressureState {
     Vented,
@@ -34,12 +38,12 @@ impl ChamberController {
         }
     }
 
-    pub fn set_atm_threshold(&mut self, p:f32) {
-        self.p_atm_threshold = p;
+    pub fn set_atm_threshold(&mut self, p_offset:f32) {
+        self.p_atm_threshold = P_ATM - p_offset;
     }
 
-    pub fn set_vacuum_threshold(&mut self, p:f32){
-        self.p_vacuum_threshold = p;
+    pub fn set_vacuum_threshold(&mut self, p_offset:f32){
+        self.p_vacuum_threshold = P_VAC + p_offset;
     }
 
     pub fn get_pressure_state(&self, p:f32) -> PressureState {

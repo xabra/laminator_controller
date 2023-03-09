@@ -302,6 +302,7 @@ mod app {
         pressure_sensor_controller.init();
 
         // ----- CHAMBER CONTROLLER -----
+        // initialization is broken...
         let chamber_controller = ChamberController::new(P_ATM_THRESHOLD, P_VACUUM_THRESHOLD);
         let bladder_controller = ChamberController::new(P_ATM_THRESHOLD, P_VACUUM_THRESHOLD);
 
@@ -349,7 +350,7 @@ mod app {
             vlv_ch_in: ValveState::Pump,
             vlv_bl_in: ValveState::Pump,
             ch_vac_th: 200.0,   // How to sync UI and controller state, especially at startup?
-            ch_vnt_th: 200.0,
+            ch_vnt_th: 200.0,   // These are pressure OFFSETS
             bl_vac_th: 200.0,
             bl_vnt_th: 200.0,
             pwr_in: false,
@@ -651,6 +652,13 @@ mod app {
             m.df_c = pwm_ctr.get_duty_factor();
             m.df_l = pwm_lr.get_duty_factor();
             m.df_f = pwm_fb.get_duty_factor();
+
+            // Seems dumb to copy UI inputs to the chamber controller?  Careful, input values are offsets...
+            c.local.chamber_controller.set_atm_threshold(ui.ch_vnt_th);
+            c.local.chamber_controller.set_vacuum_threshold(ui.ch_vac_th);
+            c.local.bladder_controller.set_atm_threshold(ui.bl_vnt_th);
+            c.local.bladder_controller.set_vacuum_threshold(ui.bl_vnt_th);
+
             m.ps_ch = c.local.chamber_controller.get_pressure_state(m.p_ch);
             m.ps_bl = c.local.bladder_controller.get_pressure_state(m.p_bl);
 
