@@ -115,14 +115,26 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
 
     }
 
-    pub fn get_pressure(&mut self, channel: usize) -> f32 {
+    pub fn get_pressure(& self, channel: usize) -> f32 {
         // Return the pressure associated with the specified channel
         self.pressures[channel]
     }
     
-    pub fn get_calibrated_pressure(&mut self, channel: usize) -> f32 {
+    pub fn get_calibrated_pressure(& self, channel: usize) -> f32 {
         // Return the pressure associated with the specified channel
         self.cal_slopes[channel] * self.pressures[channel] + self.cal_offsets[channel]
+    }
+
+    pub fn clear_calibration (&mut self, channel: usize) {
+        // Reset the calibration constants
+        self.cal_slopes[channel] = 1.0;
+        self.cal_offsets[channel] = 0.0;
+    }
+
+    pub fn calibrate (&mut self, channel: usize, p_vac: f32, p_vent: f32) {
+        // Reset the calibration constants
+        self.cal_slopes[channel] = -SCALE_PB/(p_vent-p_vac);
+        self.cal_offsets[channel] = SCALE_PB*(p_vent/(p_vent-p_vac));
     }
 }
 
