@@ -26,10 +26,7 @@ const SCALE_PB:f32 = -101_000.0;  // Pa  - Hmm. These duplicate consts in the ch
 const SCALE_SLOPE:f32 = (SCALE_PB-SCALE_PA)/(SCALE_VB-SCALE_VA);
 const SCALE_OFFSET:f32 = SCALE_PA-SCALE_VA*SCALE_SLOPE;
 
-pub struct PressureMeasurement {
-    pub channel_index: u8,
-    pub pressure_pa: f32,
-}
+
 pub struct PressureSensorController<I1, I2, P> where
     I1: PinId,
     I2: PinId,
