@@ -126,13 +126,14 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
     }
 
     pub fn clear_calibration (&mut self, channel: usize) {
-        // Reset the calibration constants
+        // Reset the calibration constants (ie no calibration)
         self.cal_slopes[channel] = 1.0;
         self.cal_offsets[channel] = 0.0;
     }
 
     pub fn calibrate (&mut self, channel: usize, p_vac: f32, p_vent: f32) {
-        // Reset the calibration constants
+        // Calculate and save the calibration constants for a channel using two measured pressures as inputs
+        // p_vac should be a negative number near -101,000 Pa.  p_vent should be near 0.0 Pa
         self.cal_slopes[channel] = -SCALE_PB/(p_vent-p_vac);
         self.cal_offsets[channel] = SCALE_PB*(p_vent/(p_vent-p_vac));
     }
