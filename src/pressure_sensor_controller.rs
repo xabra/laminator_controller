@@ -13,6 +13,8 @@ const I2C_CONVERSION_RESULT_REG_ADDRESS:u8 = 0b_0000_0000;   //Select the conver
 const I2C_CONVERSION_RESULT_DATA_MASK:u16 = 0b_0000_1111_1111_1111; // Mask off the highest four bits
 const I2C_CONVERSION_RESULT_CHANNEL_MASK:u8 = 0b_0000_0011; // Mask off
 
+// MAX_CHANNELS
+const MAX_CHANNELS: usize = 4;
 // Sensor scaling from AD count to volts per Vref
 const PRESSURE_SENSE_VREF:f32 = 5.0;
 
@@ -36,7 +38,9 @@ pub struct PressureSensorController<I1, I2, P> where
     ad_start_pin: gpio::Pin<I1, Output<PushPull>>,
     _ad_busy_pin: gpio::Pin<I2, Input<Floating>>,   // Not used for now
     i2c: P,  
-    pressures: [f32;4],  // A place to cache the results
+    pressures: [f32; MAX_CHANNELS],     // A place to cache the results
+    cal_slopes: [f32; MAX_CHANNELS],   // Stores the 2-point calibration coeffs for each channel
+    cal_offsets: [f32; MAX_CHANNELS],  // Stores the 2-point calibration coeffs for each channel
 }
 
 impl <I1, I2, P> PressureSensorController<I1, I2, P> where
@@ -54,7 +58,9 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
             ad_start_pin,
             _ad_busy_pin,
             i2c,
-            pressures: [0.0_f32; 4],
+            pressures: [0.0_f32; MAX_CHANNELS],
+            cal_slopes: [1.0_f32; MAX_CHANNELS],
+            cal_offsets: [0.0_f32; MAX_CHANNELS],
         }
     }
     pub fn 
@@ -104,6 +110,7 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
 
     pub fn acquire_all(&mut self) {
 
+        // Bad - hardcoded two channels....
         let (ch, p) = self.acquire_one_channel();
         self.pressures[ch] = p;
         let (ch, p) = self.acquire_one_channel();
@@ -112,7 +119,13 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
     }
 
     pub fn get_pressure(&mut self, channel: usize) -> f32 {
+        // Return the pressure associated with the specified channel
         self.pressures[channel]
+    }
+    
+    pub fn get_calibrated_pressure(&mut self, channel: usize) -> f32 {
+        // Return the pressure associated with the specified channel
+        self.cal_slopes[channel] * self.pressures[channel] + self.cal_offsets[channel]
     }
 }
 
