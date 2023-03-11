@@ -31,10 +31,10 @@ pub struct Measurement {
     pub pwr: bool,      // State
     pub trim_l: f32,
     pub trim_f: f32,
-    pub ch_cal_slope: f32,
-    pub ch_cal_offset: f32,
-    pub bl_cal_slope: f32,
-    pub bl_cal_offset: f32,
+    pub cal_chm: f32,   // Pressure cal factors
+    pub cal_ch0: f32,
+    pub cal_blm: f32,
+    pub cal_bl0: f32,
 
 
 }

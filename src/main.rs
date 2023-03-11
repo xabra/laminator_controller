@@ -340,10 +340,10 @@ mod app {
             isrun: false,       // Recipe is running.
             trim_l: 1.0,
             trim_f: 1.0,
-            ch_cal_slope: 1.0,
-            ch_cal_offset: 0.0,
-            bl_cal_slope: 1.0,
-            bl_cal_offset: 0.0,
+            cal_chm: 1.0,
+            cal_ch0: 0.0,
+            cal_blm: 1.0,
+            cal_bl0: 0.0,
         };
 
         let ui_inputs = UiInputs{
