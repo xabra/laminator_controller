@@ -315,35 +315,35 @@ mod app {
         let p_bladder_filter = MovingAverageFilter::<f32, 50>::new();
 
         let measurement = Measurement {
-            tt_c: 0.0,
-            tt_l: 0.0,
-            tt_f: 0.0,   
-            tt_avg: 0.0,
-            tt_sp: 0.0,   // Current temp setpoint
-            tt_delta: 0.0,
-            tt_err_c: TCError::NoTCError,
-            tt_err_l: TCError::NoTCError,
-            tt_err_f: TCError::NoTCError,
-            p_ch: 0.0,
-            p_bl: 0.0,
-            ps_ch: PressureState::Vented,
-            ps_bl: PressureState::Evacuated,
-            df_c: 0.0,
-            df_l: 0.0,
-            df_f: 0.0,
-            vlv_ch: ValveState::Pump,   // Owned by valve controllers
-            vlv_bl: ValveState::Pump, 
+            tc: 0.0,
+            tl: 0.0,
+            tf: 0.0,   
+            tav: 0.0,
+            tsp: 0.0,   // Current temp setpoint
+            td: 0.0,
+            terc: TCError::NoTCError,
+            terl: TCError::NoTCError,
+            terf: TCError::NoTCError,
+            pch: 0.0,
+            pbl: 0.0,
+            psch: PressureState::Vented,
+            psbl: PressureState::Evacuated,
+            dfc: 0.0,
+            dfl: 0.0,
+            dff: 0.0,
+            vch: ValveState::Pump,   // Owned by valve controllers
+            vbl: ValveState::Pump, 
             pwr: false,
-            t_ela: 0, // Recipe elapsed time.
+            te: 0, // Recipe elapsed time.
             seg: 0,
-            t_rcp: 0,
+            tr: 0,
             isrun: false,       // Recipe is running.
-            trim_l: 1.0,
-            trim_f: 1.0,
-            cal_chm: 1.0,
-            cal_ch0: 0.0,
-            cal_blm: 1.0,
-            cal_bl0: 0.0,
+            trl: 1.0,
+            trf: 1.0,
+            cchm: 1.0,
+            cch0: 0.0,
+            cblm: 1.0,
+            cbl0: 0.0,
         };
 
         let ui_inputs = UiInputs{
@@ -553,15 +553,15 @@ mod app {
 
         // Lock shared.measurement and write data to shared measurements data structure
         (c.shared.measurement).lock(|m: _| {
-            m.tt_c = temp_ctr_filtered;
-            m.tt_l = temp_lr_filtered;
-            m.tt_f = temp_fb_filtered;
-            m.tt_avg = temp_avg_filtered;
-            m.tt_err_c = temp_err_ctr;
-            m.tt_err_l = temp_err_lr;
-            m.tt_err_f = temp_err_fb;
-            m.p_ch = p_chamber_filtered;
-            m.p_bl = p_bladder_filtered;
+            m.tc = temp_ctr_filtered;
+            m.tl = temp_lr_filtered;
+            m.tf = temp_fb_filtered;
+            m.tav = temp_avg_filtered;
+            m.terc = temp_err_ctr;
+            m.terl = temp_err_lr;
+            m.terf = temp_err_fb;
+            m.pch = p_chamber_filtered;
+            m.pbl = p_bladder_filtered;
         });
 
         // Debug pin for checking timing...
@@ -634,28 +634,28 @@ mod app {
             }
 
             // Get overall duty_factor from PID controller
-            let pwm_out: f32 =  c.local.pid_controller.update(m.tt_avg, setpoint_temp);        
+            let pwm_out: f32 =  c.local.pid_controller.update(m.tav, setpoint_temp);        
         
 
             // Set the duty_factors for the 3 sets of heaters
             let df_ctr = pwm_out;
-            let df_lr = pwm_out*m.trim_l;
-            let df_fb = pwm_out*m.trim_f;
+            let df_lr = pwm_out*m.trl;
+            let df_fb = pwm_out*m.trf;
             pwm_ctr.set_duty_factor(df_ctr);
             pwm_lr.set_duty_factor(df_lr);
             pwm_fb.set_duty_factor(df_fb); 
 
             //  --- FILL IN STRUCT VALUES TO SEND TO UI
-            m.t_rcp = r.recipe_current_time(); // Put the current recipe time in the data struct
+            m.tr = r.recipe_current_time(); // Put the current recipe time in the data struct
             m.isrun = r.is_running(); // Copy recipe manager running state to pv variables for the UI
-            m.tt_sp = setpoint_temp;   // Current temp setpoint output to UI
-            m.tt_delta = setpoint_temp-m.tt_avg;  // Current temp delta (error)
-            m.vlv_ch = c.local.chamber_valve.get_valve_state();
-            m.vlv_bl = c.local.bladder_valve.get_valve_state();
-            m.t_ela = elapsed; // Recipe elapsed time.
-            m.df_c = pwm_ctr.get_duty_factor();
-            m.df_l = pwm_lr.get_duty_factor();
-            m.df_f = pwm_fb.get_duty_factor();
+            m.tsp = setpoint_temp;   // Current temp setpoint output to UI
+            m.td = setpoint_temp-m.tav;  // Current temp delta (error)
+            m.vch = c.local.chamber_valve.get_valve_state();
+            m.vbl = c.local.bladder_valve.get_valve_state();
+            m.te = elapsed; // Recipe elapsed time.
+            m.dfc = pwm_ctr.get_duty_factor();
+            m.dfl = pwm_lr.get_duty_factor();
+            m.dff = pwm_fb.get_duty_factor();
 
             // Seems dumb to copy UI inputs to the chamber controller?  Careful, input values are offsets...
             c.local.chamber_controller.set_atm_threshold(ui.ch_vnt_th);
@@ -663,8 +663,8 @@ mod app {
             c.local.bladder_controller.set_atm_threshold(ui.bl_vnt_th);
             c.local.bladder_controller.set_vacuum_threshold(ui.bl_vnt_th);
 
-            m.ps_ch = c.local.chamber_controller.get_pressure_state(m.p_ch);
-            m.ps_bl = c.local.bladder_controller.get_pressure_state(m.p_bl);
+            m.psch = c.local.chamber_controller.get_pressure_state(m.pch);
+            m.psbl = c.local.bladder_controller.get_pressure_state(m.pbl);
 
             // ------------------ UART SEND ---------------
             let mut json_buf = [0_u8; UART_TX_BUF_MAX];     // Create oversized buffer to hold JSON string

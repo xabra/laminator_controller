@@ -17,13 +17,13 @@ pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r
         "set_heater_trim_lr" => {
             // This input works even if a recipe is running
             let v = command.value.parse::<f32>().unwrap();
-            m.trim_l = v;
+            m.trl = v;
             info!("Setting heater lr trim to: {:?}", v);
         }
         "set_heater_trim_fb" => {
             // This input works even if a recipe is running
             let v = command.value.parse::<f32>().unwrap();
-            m.trim_f = v;
+            m.trf = v;
             info!("Setting heater fb trim to: {:?}", v);
         }
 
@@ -59,7 +59,7 @@ pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r
                 },
                 "stop" => {
                     if r.is_running() {
-                        u.tt_sp_in = m.tt_sp;
+                        u.tt_sp_in = m.tsp;
                         r.run(false);
                         info!("Recipe Stop");
                     }

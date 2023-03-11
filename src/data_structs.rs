@@ -6,35 +6,35 @@ use defmt_rtt as _;
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct Measurement {
     // Pure OUTPUTS to UI .
-    pub tt_c: f32,
-    pub tt_l: f32,
-    pub tt_f: f32, 
-    pub tt_avg: f32,
-    pub tt_sp: f32,
-    pub tt_delta: f32,
-    pub tt_err_c: TCError,
-    pub tt_err_l: TCError,
-    pub tt_err_f: TCError,  
-    pub p_ch: f32,
-    pub p_bl: f32,
-    pub ps_ch: PressureState,
-    pub ps_bl: PressureState,
-    pub df_c: f32,
-    pub df_l: f32,
-    pub df_f: f32,
-    pub vlv_ch: ValveState, // From recipe if running, otherwise input from UI
-    pub vlv_bl: ValveState, // From recipe if running, otherwise input from UI
-    pub t_ela: u32,     // Owned by measurement struct.
-    pub t_rcp: u32,     // Owned by recipe mgr. Recipe elapsed time.
-    pub seg: usize,     // Owned by recipe mgr.
-    pub isrun: bool,    // Owned by recipe mgr
-    pub pwr: bool,      // State
-    pub trim_l: f32,
-    pub trim_f: f32,
-    pub cal_chm: f32,   // Pressure cal factors
-    pub cal_ch0: f32,
-    pub cal_blm: f32,
-    pub cal_bl0: f32,
+    pub tc: f32,    // temp center
+    pub tl: f32,    // temp left
+    pub tf: f32,    // temp front
+    pub tav: f32,   // temp avg
+    pub tsp: f32,   // temp set point
+    pub td: f32,    // temp delta (pid error)
+    pub terc: TCError,  // TC errors
+    pub terl: TCError,
+    pub terf: TCError,  
+    pub pch: f32,   // Pressure chamber
+    pub pbl: f32,   // pressure bladder
+    pub psch: PressureState,    // pressure state chamber
+    pub psbl: PressureState,    // pressure state bladder
+    pub dfc: f32,   // Duty factors
+    pub dfl: f32,
+    pub dff: f32,
+    pub vch: ValveState, // From recipe if running, otherwise input from UI
+    pub vbl: ValveState, // From recipe if running, otherwise input from UI
+    pub te: u32,     // Time elapsed.  Owned by measurement struct.
+    pub tr: u32,     // Time recipe.  Owned by recipe mgr. Recipe elapsed time.
+    pub seg: usize,     // Current recipe segment. Owned by recipe mgr.
+    pub isrun: bool,    // Is recipe currently running.  Owned by recipe mgr
+    pub pwr: bool,      // Is 'power' on.  Unused?  State
+    pub trl: f32,    // Heater trim factors
+    pub trf: f32,
+    pub cchm: f32,   // Pressure cal factors
+    pub cch0: f32,
+    pub cblm: f32,
+    pub cbl0: f32,
 
 
 }
