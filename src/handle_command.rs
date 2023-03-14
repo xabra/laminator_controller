@@ -114,14 +114,20 @@ pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r
             info!("Bladder Clear Cal");
         }
         "chbr_cal" => {
-            //let vacp = command.value.bladder_cal_vac.parse::<f32>().unwrap();
-            //let ventp = command.value.bladder_cal_vent.parse::<f32>().unwrap();
-            info!("Setting chamber cal: {:?}", command.value);
+            let s = command.value.split_once(",");
+            if let Some(values) = s {
+                let vacp = values.0.parse::<f32>().unwrap();
+                let ventp = values.1.parse::<f32>().unwrap();
+                info!("Setting chamber cal: VACP: {:?}, VENTP: {:?}", vacp, ventp);
+            }
         }
         "bladder_cal" => {
-            //let vacp = command.value.bladder_cal_vac.parse::<f32>().unwrap();
-            //let ventp = command.value.bladder_cal_vent.parse::<f32>().unwrap();
-            info!("Setting bladder cal: {:?}", command.value);
+            let s = command.value.split_once(",");
+            if let Some(values) = s {
+                let vacp = values.0.parse::<f32>().unwrap();
+                let ventp = values.1.parse::<f32>().unwrap();
+                info!("Setting bladder cal: VACP: {:?}, VENTP: {:?}", vacp, ventp);
+            }
         }
 
         // --- Default case
