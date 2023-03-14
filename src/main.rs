@@ -357,6 +357,10 @@ mod app {
             ch_vnt_th: 200.0,   // These are pressure OFFSETS
             bl_vac_th: 200.0,
             bl_vnt_th: 200.0,
+            ch_cal_vnt: 0.0,    // Pressure cal factors
+            ch_cal_vac: -101_000.0, // repeated Constants????!  
+            bl_cal_vnt: 0.0,
+            bl_cal_vac: -101_000.0,
             pwr_in: false,
         };
 
@@ -665,6 +669,8 @@ mod app {
 
             m.psch = c.local.chamber_controller.get_pressure_state(m.pch);
             m.psbl = c.local.bladder_controller.get_pressure_state(m.pbl);
+
+
 
             // ------------------ UART SEND ---------------
             let mut json_buf = [0_u8; UART_TX_BUF_MAX];     // Create oversized buffer to hold JSON string

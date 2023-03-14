@@ -103,8 +103,25 @@ pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r
         "set_bladder_vac_thresh" => {
             let th = command.value.parse::<f32>().unwrap();
             u.bl_vac_th = th;
-            info!("Setting bladder vac
-             thresh: {:?}", th);
+            info!("Setting bladder vac thresh: {:?}", th);
+        }
+
+        // --- PRESSURE CALIBRATION 
+        "chbr_clear_cal" => {
+            info!("Chamber Clear Cal");
+        }
+        "bladder_clear_cal" => {
+            info!("Bladder Clear Cal");
+        }
+        "chbr_cal" => {
+            //let vacp = command.value.bladder_cal_vac.parse::<f32>().unwrap();
+            //let ventp = command.value.bladder_cal_vent.parse::<f32>().unwrap();
+            info!("Setting chamber cal: {:?}", command.value);
+        }
+        "bladder_cal" => {
+            //let vacp = command.value.bladder_cal_vac.parse::<f32>().unwrap();
+            //let ventp = command.value.bladder_cal_vent.parse::<f32>().unwrap();
+            info!("Setting bladder cal: {:?}", command.value);
         }
 
         // --- Default case
