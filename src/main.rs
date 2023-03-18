@@ -111,6 +111,9 @@ mod app {
         ui_inputs: UiInputs,
         recipe: Recipe::<N_RECIPE_SETPOINTS>,
 
+        // Pressure Sensor Controller
+        pressure_sensor_controller: PressureSensorController<Gpio6, Gpio7, I2C<I2C0, (Pin<Gpio4, FunctionI2C>, Pin<Gpio5, FunctionI2C>)>>,
+
     }
 
     // ----------------------------------------------------------------
@@ -124,9 +127,6 @@ mod app {
         
         // Thermocouple
         tc_controller: ThermocoupleController<SPI0, N_TC_CHANNELS>,
-
-        // Pressure Sensor Controller
-        pressure_sensor_controller: PressureSensorController<Gpio6, Gpio7, I2C<I2C0, (Pin<Gpio4, FunctionI2C>, Pin<Gpio5, FunctionI2C>)>>,
 
         temp_ctr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
         temp_lr_filter: MovingAverageFilter<f32, FILTER_LENGTH>,
@@ -362,6 +362,10 @@ mod app {
             bl_cal_vnt: 0.0,
             bl_cal_vac: -101_000.0,
             pwr_in: false,
+            ch_docal: false,
+            bl_docal: false,
+            ch_clrcal: false,
+            bl_clrcal: false,
         };
 
         // ----- PID Controller -----
@@ -396,12 +400,12 @@ mod app {
             measurement,
             ui_inputs,
             recipe,
+            pressure_sensor_controller,
             }, 
         Local {
             alarm1,
             alarm2,
             tc_controller,
-            pressure_sensor_controller,
             temp_ctr_filter,
             temp_lr_filter,
             temp_fb_filter,
@@ -475,11 +479,10 @@ mod app {
     #[task(
         priority = 2, 
         binds = TIMER_IRQ_2,  
-        shared = [debug_pin, measurement],
+        shared = [debug_pin, measurement, pressure_sensor_controller,],
         local = [
             alarm2, 
             tc_controller,
-            pressure_sensor_controller,
             toggle: bool = true,
             temp_ctr_filter,
             temp_lr_filter,
@@ -537,15 +540,15 @@ mod app {
         };
         temp_avg = temp_sum/(good_tc_count as f32);
 
-        
-        // Acquire pressure measurements
-        let p_chamber:f32;
-        let p_bladder:f32;
-        let psc = c.local.pressure_sensor_controller;
-        psc.acquire_all();
-        p_chamber = psc.get_pressure(0);
-        p_bladder = psc.get_pressure(2);
-
+        let mut p_chamber: f32 = 0.0;
+        let mut p_bladder: f32 = 0.0;
+        c.shared.pressure_sensor_controller.lock(|psc: _| {
+            psc.acquire_all();
+            //p_chamber = psc.get_pressure(0);
+            //p_bladder = psc.get_pressure(2);
+            p_chamber = psc.get_calibrated_pressure(0);
+            p_bladder = psc.get_calibrated_pressure(2);
+        });
 
         // Filter all input signals
         let temp_ctr_filtered = c.local.temp_ctr_filter.push(temp_ctr);
@@ -589,6 +592,7 @@ mod app {
             ui_inputs, 
             pwm_ctr, pwm_lr, pwm_fb,
             recipe,
+            pressure_sensor_controller,
             ],
         local = [
             toggle: bool = true, 
@@ -604,7 +608,7 @@ mod app {
     )]
     fn control_loop_task (c: control_loop_task::Context) { 
 
-        (c.shared.measurement, c.shared.ui_inputs, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb, c.shared.recipe).lock(|m: _, ui: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _, r: _| {
+        (c.shared.measurement, c.shared.ui_inputs, c.shared.pwm_ctr, c.shared.pwm_lr, c.shared.pwm_fb, c.shared.recipe, c.shared.pressure_sensor_controller).lock(|m: _, ui: _, pwm_ctr: _ , pwm_lr: _ , pwm_fb: _, r: _, psc:_| {
             
             // Get elapsed time since power on
             let now = crate::time_util::date_time_to_seconds(c.local.rtc.now().unwrap());
@@ -649,6 +653,32 @@ mod app {
             pwm_lr.set_duty_factor(df_lr);
             pwm_fb.set_duty_factor(df_fb); 
 
+            // Clear pressure calibration if flagged
+            if ui.ch_clrcal == true {
+                psc.clear_calibration(0);
+                ui.ch_clrcal = false;                m.cch0 = psc.get_cal_offset(0);
+                m.cch0 = psc.get_cal_offset(0);
+                m.cchm = psc.get_cal_slope(0);
+            }
+            if ui.bl_clrcal == true {
+                psc.clear_calibration(2);
+                ui.bl_clrcal = false;
+                m.cbl0 = psc.get_cal_offset(2);
+                m.cblm = psc.get_cal_slope(2);
+            }
+            if ui.ch_docal == true {
+                psc.calibrate(0, ui.ch_cal_vac, ui.ch_cal_vnt);
+                ui.ch_docal = false;
+                m.cch0 = psc.get_cal_offset(0);
+                m.cchm = psc.get_cal_slope(0);
+            }
+            if ui.bl_docal == true {
+                psc.calibrate(2, ui.bl_cal_vac, ui.bl_cal_vnt);
+                ui.bl_docal = false;
+                m.cbl0 = psc.get_cal_offset(2);
+                m.cblm = psc.get_cal_slope(2);
+            }
+
             //  --- FILL IN STRUCT VALUES TO SEND TO UI
             m.tr = r.recipe_current_time(); // Put the current recipe time in the data struct
             m.isrun = r.is_running(); // Copy recipe manager running state to pv variables for the UI
@@ -669,8 +699,6 @@ mod app {
 
             m.psch = c.local.chamber_controller.get_pressure_state(m.pch);
             m.psbl = c.local.bladder_controller.get_pressure_state(m.pbl);
-
-
 
             // ------------------ UART SEND ---------------
             let mut json_buf = [0_u8; UART_TX_BUF_MAX];     // Create oversized buffer to hold JSON string

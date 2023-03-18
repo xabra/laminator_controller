@@ -110,7 +110,7 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
         // Bad - hardcoded two channels....
         let (ch, p) = self.acquire_one_channel();
         self.pressures[ch] = p;
-        let (ch, p) = self.acquire_one_channel();
+        let (ch, p) = self.acquire_one_channel();// !!!Chip setup to acquire ch 0, then ch 2 on second call!!!
         self.pressures[ch] = p;
 
     }
@@ -125,6 +125,13 @@ impl <I1, I2, P> PressureSensorController<I1, I2, P> where
         self.cal_slopes[channel] * self.pressures[channel] + self.cal_offsets[channel]
     }
 
+    pub fn get_cal_slope(& self, channel:usize) -> f32 {
+        self.cal_slopes[channel]
+    }
+
+    pub fn get_cal_offset(& self, channel:usize) -> f32 {
+        self.cal_offsets[channel]
+    }
     pub fn clear_calibration (&mut self, channel: usize) {
         // Reset the calibration constants (ie no calibration)
         self.cal_slopes[channel] = 1.0;

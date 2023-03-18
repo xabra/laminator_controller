@@ -108,25 +108,29 @@ pub fn handle_command(command: Command, m: &mut Measurement, u: &mut UiInputs, r
 
         // --- PRESSURE CALIBRATION 
         "chbr_clear_cal" => {
+            u.ch_clrcal = true;
             info!("Chamber Clear Cal");
         }
         "bladder_clear_cal" => {
+            u.bl_clrcal = true;
             info!("Bladder Clear Cal");
         }
         "chbr_cal" => {
             let s = command.value.split_once(",");
             if let Some(values) = s {
-                let vacp = values.0.parse::<f32>().unwrap();
-                let ventp = values.1.parse::<f32>().unwrap();
-                info!("Setting chamber cal: VACP: {:?}, VENTP: {:?}", vacp, ventp);
+                u.ch_cal_vac = values.0.parse::<f32>().unwrap();
+                u.ch_cal_vnt = values.1.parse::<f32>().unwrap();
+                u.ch_docal = true; //set flag to update values
+                info!("Setting chamber cal: VACP: {:?}, VENTP: {:?}", u.ch_cal_vac, u.ch_cal_vnt);
             }
         }
         "bladder_cal" => {
             let s = command.value.split_once(",");
             if let Some(values) = s {
-                let vacp = values.0.parse::<f32>().unwrap();
-                let ventp = values.1.parse::<f32>().unwrap();
-                info!("Setting bladder cal: VACP: {:?}, VENTP: {:?}", vacp, ventp);
+                u.bl_cal_vac = values.0.parse::<f32>().unwrap();
+                u.bl_cal_vnt = values.1.parse::<f32>().unwrap();
+                u.bl_docal = true; //set flag to update values
+                info!("Setting bladder cal: VACP: {:?}, VENTP: {:?}", u.bl_cal_vac, u.bl_cal_vnt);
             }
         }
 
