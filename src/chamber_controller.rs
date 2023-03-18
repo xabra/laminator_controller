@@ -8,7 +8,7 @@ use serde::{Serialize, Deserialize};
 const P_ATM: f32 = 0.0;            // Pa.  Atmospheric pressure
 const P_VAC: f32 = -101_000.0;     // Pa.  Full vacuum pressure
 
-#[derive(Debug, Copy, Clone, defmt::Format, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, defmt::Format, PartialEq, Serialize, Deserialize)]
 pub enum PressureState {
     Vented,
     Intermediate,
