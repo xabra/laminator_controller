@@ -646,9 +646,11 @@ mod app {
         
 
             // Set the duty_factors for the 3 sets of heaters
-            let df_ctr = pwm_out;
-            let df_lr = pwm_out*m.trl;
-            let df_fb = pwm_out*m.trf;
+            // Interlock against operating heaters when in Intermediate pressure ie. when not under vacuum or vented
+            let df_ctr = if m.psch == PressureState::Intermediate {0.0} else {pwm_out};
+            let df_lr = if m.psch == PressureState::Intermediate {0.0} else {pwm_out*m.trl};
+            let df_fb = if m.psch == PressureState::Intermediate {0.0} else { pwm_out*m.trf};
+
             pwm_ctr.set_duty_factor(df_ctr);
             pwm_lr.set_duty_factor(df_lr);
             pwm_fb.set_duty_factor(df_fb); 
@@ -666,6 +668,8 @@ mod app {
                 m.cbl0 = psc.get_cal_offset(2);
                 m.cblm = psc.get_cal_slope(2);
             }
+
+            // Do calibration if flagged
             if ui.ch_docal == true {
                 psc.calibrate(0, ui.ch_cal_vac, ui.ch_cal_vnt);
                 ui.ch_docal = false;
