@@ -31,7 +31,7 @@ pub struct Measurement {
     pub pwr: bool,      // Is 'power' on.  Unused?  State
     pub trl: f32,    // Heater trim factors
     pub trf: f32,
-    pub cchm: f32,   // Pressure cal factors
+    pub cchm: f32,   // Pressure cal factors: m = slope, 0=offset
     pub cch0: f32,
     pub cblm: f32,
     pub cbl0: f32,
@@ -51,10 +51,14 @@ pub struct UiInputs {
     pub ch_vac_th: f32,
     pub bl_vnt_th: f32,
     pub bl_vac_th: f32,
-    pub ch_cal_vnt: f32,    // Pressure cal factors
+    pub ch_cal_vnt: f32,    // Pressure calibration pressure measurements
     pub ch_cal_vac: f32,
     pub bl_cal_vnt: f32,
     pub bl_cal_vac: f32,
+    pub ch_docal: bool,     // Do calibration flag
+    pub bl_docal: bool,
+    pub ch_clrcal: bool,    // Clear calibration flag
+    pub bl_clrcal: bool,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, defmt::Format)]
