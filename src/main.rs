@@ -69,7 +69,8 @@ mod app {
     // Length of the low pass averaging filter
     const FILTER_LENGTH: usize = 50;
     const N_TC_CHANNELS: usize = 3;
-    pub const N_RECIPE_SETPOINTS: usize = 4;
+
+    pub const N_RECIPE_SETPOINTS: usize = 6;
 
     const UART_RX_BUF_MAX: usize = 80;
     const UART_TX_BUF_MAX: usize = 500;
@@ -229,15 +230,17 @@ mod app {
 
 
         // --------------- CREATE RECIPE --------------
-        
         static RECIPE_ARRAY:[SetPoint; N_RECIPE_SETPOINTS] = [
-        SetPoint{t:0, temp: 10.0, p_chamber: Evacuated, p_bladder: Vented},
-        SetPoint{t:40, temp: 50.0, p_chamber: Vented, p_bladder: Evacuated},
-        SetPoint{t:80, temp: 50.0, p_chamber: Evacuated, p_bladder: Vented},
-        SetPoint{t:120, temp: 10.0, p_chamber: Vented, p_bladder: Evacuated},
+        SetPoint{duration: 20, temp: 10.0, p_chamber: Vented, p_bladder: Vented},
+        SetPoint{duration: 20, temp: 10.0, p_chamber: Vented, p_bladder: Evacuated},    // Pump on bladder
+        SetPoint{duration: 20, temp: 10.0, p_chamber: Evacuated, p_bladder: Evacuated}, // Pump on bladder and chamber
+        SetPoint{duration: 20, temp: 50.0, p_chamber: Evacuated, p_bladder: Evacuated},    // Both should be pumped by here...start temp ramp...
+        SetPoint{duration: 20, temp: 10.0, p_chamber: Vented, p_bladder: Evacuated},   //
+        SetPoint{duration: 20, temp: 10.0, p_chamber: Vented, p_bladder: Vented},   // Duration of last setpoint is ignored
         ];
 
-        let recipe = Recipe::<N_RECIPE_SETPOINTS>::new(RECIPE_ARRAY);// new sets the recipe time to 0 and is_running to false
+        let mut recipe = Recipe::<N_RECIPE_SETPOINTS>::new(RECIPE_ARRAY);// new sets the recipe time to 0 and is_running to false
+        recipe.calculate_setpoint_times(); // Should be chained or inside the new() OR SOMETHING...
         recipe.list_setpoints();
 
         
