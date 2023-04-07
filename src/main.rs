@@ -70,7 +70,7 @@ mod app {
     const FILTER_LENGTH: usize = 50;
     const N_TC_CHANNELS: usize = 3;
 
-    pub const N_RECIPE_SETPOINTS: usize = 6;
+    pub const N_RECIPE_SETPOINTS: usize = 10;
 
     const UART_RX_BUF_MAX: usize = 80;
     const UART_TX_BUF_MAX: usize = 500;
@@ -231,12 +231,16 @@ mod app {
 
         // --------------- CREATE RECIPE --------------
         static RECIPE_ARRAY:[SetPoint; N_RECIPE_SETPOINTS] = [
-        SetPoint{duration: 20, temp: 10.0, p_chamber: Vented, p_bladder: Vented},
-        SetPoint{duration: 20, temp: 10.0, p_chamber: Vented, p_bladder: Evacuated},    // Pump on bladder
-        SetPoint{duration: 20, temp: 10.0, p_chamber: Evacuated, p_bladder: Evacuated}, // Pump on bladder and chamber
-        SetPoint{duration: 20, temp: 50.0, p_chamber: Evacuated, p_bladder: Evacuated},    // Both should be pumped by here...start temp ramp...
-        SetPoint{duration: 20, temp: 10.0, p_chamber: Vented, p_bladder: Evacuated},   //
-        SetPoint{duration: 20, temp: 10.0, p_chamber: Vented, p_bladder: Vented},   // Duration of last setpoint is ignored
+        SetPoint{duration: 20, temp: 0.0, p_chamber: Vented, p_bladder: Vented},        // Start up, vented
+        SetPoint{duration: 20, temp: 0.0, p_chamber: Vented, p_bladder: Evacuated},    // Pump on bladder to lift it.
+        SetPoint{duration: 360, temp: 18.0, p_chamber: Evacuated, p_bladder: Evacuated},// Pump on chamber also, no heat to evacuate module
+        SetPoint{duration: 360, temp: 50.0, p_chamber: Evacuated, p_bladder: Evacuated},// Ramp temp to warm, no pressure
+        SetPoint{duration: 30, temp: 50.0, p_chamber: Evacuated, p_bladder: Vented},    // Apply bladder pressure
+        SetPoint{duration: 720, temp: 145.0, p_chamber: Evacuated, p_bladder: Vented}, // Ramp temp and hold cure
+        SetPoint{duration: 480, temp: 145.0, p_chamber: Evacuated, p_bladder: Vented}, // Soak
+        SetPoint{duration: 60, temp: 0.0, p_chamber: Evacuated, p_bladder: Vented},  // Heat off, with pressure
+        SetPoint{duration: 480, temp: 0.0, p_chamber: Vented, p_bladder: Vented},   // Vent chamber, no pressure
+        SetPoint{duration: 2000, temp: 0.0, p_chamber: Vented, p_bladder: Vented},   // Duration of last setpoint is ignored
         ];
 
         let mut recipe = Recipe::<N_RECIPE_SETPOINTS>::new(RECIPE_ARRAY);// new sets the recipe time to 0 and is_running to false
